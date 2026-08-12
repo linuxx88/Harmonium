@@ -1,15 +1,21 @@
 import os
 import time
-from typing import Dict, Optional, List
+import random
+from typing import Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from web3 import Web3
 from backend.oracle import verify_carrier_status, compute_tracking_hash, verify_onchain_order_state, OracleSignerNode
+from backend.database import init_db, save_order, get_order_by_session_id, get_order_by_id, update_order_attestation
 
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL", "")
 
 app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Network Service", version="1.0.0")
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000,http://127.0.0.1:3000").split(",")
 
@@ -20,10 +26,6 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
 )
-
-checkout_sessions: Dict[str, dict] = {}
-tracked_orders: Dict[str, dict] = {}
-order_nonces: Dict[str, int] = {}
 
 # Initialize independent Oracle Signer Nodes
 ORACLE_NODES: List[OracleSignerNode] = []
@@ -89,34 +91,33 @@ def create_checkout_session(req: CheckoutSessionRequest):
         "tracking_id": req.tracking_id,
         "status": "pending_deposit"
     }
-    checkout_sessions[session_id] = session_data
-    tracked_orders[req.order_id] = session_data
-    return session_data
+    saved_order = save_order(session_data)
+    return saved_order
 
 @app.get("/api/v1/checkout/session/{session_id}")
 def get_checkout_session(session_id: str):
-    if session_id not in checkout_sessions:
+    order = get_order_by_session_id(session_id)
+    if not order:
         raise HTTPException(status_code=404, detail="Session not found")
-    return checkout_sessions[session_id]
+    return order
 
 @app.post("/api/v1/order/{order_id}/attestation")
 def create_order_attestation(order_id: str, req: AttestationRequest):
-    if order_id not in tracked_orders:
+    order = get_order_by_id(order_id)
+    if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    order = tracked_orders[order_id]
     
     if order.get("buyer") and req.buyer.lower() != order["buyer"].lower():
         raise HTTPException(status_code=400, detail="Buyer address mismatch! Cannot generate attestation for unauthorized buyer identity.")
     
-    order["buyer"] = order.get("buyer", req.buyer)
+    buyer_checksum = Web3.to_checksum_address(req.buyer)
     
     # Verify order state on-chain via Web3 RPC provider if configured
     is_valid_onchain = verify_onchain_order_state(
         web3_provider_url=WEB3_PROVIDER_URL,
         contract_address=order["contract_address"],
         order_id_hex=order["order_id"],
-        expected_buyer=req.buyer,
+        expected_buyer=buyer_checksum,
         expected_seller=order["seller"],
         expected_gross_amount=order["gross_amount"],
         expected_item_price=order["item_price"]
@@ -137,7 +138,6 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
         quorum_attestations = []
         signatures = []
 
-        import random
         # Dynamically select 2 out of all available active oracle nodes (true 2-of-3 threshold quorum)
         selected_nodes = random.sample(ORACLE_NODES, k=2) if len(ORACLE_NODES) >= 2 else ORACLE_NODES
         for node in selected_nodes:
@@ -145,7 +145,7 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
                 contract_address=order["contract_address"],
                 chain_id=order["chain_id"],
                 order_id_hex=order["order_id"],
-                buyer=req.buyer,
+                buyer=buyer_checksum,
                 seller=order["seller"],
                 token=order["token"],
                 gross_amount=order["gross_amount"],
@@ -158,16 +158,22 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
             quorum_attestations.append(attestation)
             signatures.append(attestation["signature"])
 
-        order["signatures"] = signatures
-        order["quorum_attestations"] = quorum_attestations
-        order["voucher_deadline"] = voucher_deadline
-        order["nonce"] = current_nonce
-        order["status"] = "ready_for_release"
+        updated_order = update_order_attestation(
+            order_id=order_id,
+            buyer=buyer_checksum,
+            status="ready_for_release",
+            nonce=current_nonce,
+            voucher_deadline=voucher_deadline,
+            signatures=signatures
+        )
+        if updated_order:
+            updated_order["quorum_attestations"] = quorum_attestations
+
         return {
             "status": "success",
             "threshold_met": True,
             "quorum_count": len(signatures),
-            "order": order
+            "order": updated_order
         }
 
     return {"status": "pending_delivery", "carrier_info": carrier_info}

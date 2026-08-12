@@ -32,11 +32,11 @@ def verify_onchain_order_state(
     Returns True if on-chain state matches or if web3 provider is unavailable (fallback mode).
     """
     if not web3_provider_url:
-        return True
+        return False
     try:
         w3 = Web3(Web3.HTTPProvider(web3_provider_url))
         if not w3.is_connected():
-            return True
+            return False
         abi = [
             {
                 "inputs": [{"name": "", "type": "bytes32"}],
