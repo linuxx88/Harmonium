@@ -265,5 +265,26 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
         "InvalidStatus"
       );
     });
+
+    it("Should block deposit when contract is paused but allow claimRefund when paused", async function () {
+      const NEW_ORDER_ID = ethers.utils.id("ORDER_PAUSE_TEST");
+      await escrow.connect(owner).pause();
+
+      await expectRevertCustomError(
+        escrow.connect(buyer).deposit(NEW_ORDER_ID, seller.address, ITEM_PRICE),
+        escrow,
+        "EnforcedPause"
+      );
+
+      // Timeout order ORDER_ID deposited during beforeEach
+      await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
+      await ethers.provider.send("evm_mine");
+
+      // claimRefund must succeed even when paused
+      const initialBalance = await mockUSDC.balanceOf(buyer.address);
+      await escrow.connect(buyer).claimRefund(ORDER_ID);
+      const finalBalance = await mockUSDC.balanceOf(buyer.address);
+      expect(finalBalance.sub(initialBalance).toString()).to.equal(GROSS_AMOUNT.toString());
+    });
   });
 });

@@ -24,16 +24,25 @@ Decentralized Stripe enables Non-custodial, permissionless e-commerce escrow wit
 ```
 
 ### Key Non-Custodial Invariants & Security Highlights
-- **Non-Custodial Invariants**:
-  - The administrator has no authority to release, refund, confiscate, or transfer escrowed funds under any circumstances.
-  - An escrow order state machine is strictly linear: `CREATED` -> `FUNDED` -> (`SETTLED`) OR (`REFUNDED`). Terminal states (`SETTLED`, `REFUNDED`) are irreversible.
-  - An escrow order can NEVER be both `SETTLED` and `REFUNDED`.
-- **EIP-712 Typed Data Signatures**: Replaced generic ECDSA signatures with structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `trackingHash`, `nonce`, `deadline`) to block cross-chain, cross-contract, and replay attacks.
+- **10 Explicit Security Invariants**:
+  1. **Invariant 1**: A settled order can never be refunded.
+  2. **Invariant 2**: A refunded order can never be settled.
+  3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund`).
+  4. **Invariant 4**: Only authorized oracle quorum (2-of-3) can trigger settlement via release voucher attestation.
+  5. **Invariant 5**: A settlement voucher can only be used once (nonce invalidated).
+  6. **Invariant 6**: A voucher cannot be replayed on another chain (`chainId` in EIP-712 domain).
+  7. **Invariant 7**: A voucher cannot be replayed on another escrow contract (`verifyingContract` address in EIP-712 domain).
+  8. **Invariant 8**: The seller can never withdraw funds before settlement.
+  9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
+  10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters.
+- **Circuit Breaker Pause Rules**:
+  - `createOrder`, `deposit`, `releaseWithOracle`, `releaseByBuyer` are paused during circuit breaker activation.
+  - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds.
+- **Race Condition Resolution**: On-chain transaction ordering determines state. Whichever valid transaction (`SETTLED` or `REFUNDED`) hits the block first seals the terminal state.
+- **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `trackingHash`, `nonce`, `deadline`) to block cross-chain, cross-contract, and replay attacks.
 - **2-of-3 Threshold Oracle Quorum**: Multi-signature oracle attestation requirement verifying `signatures[0]` and `signatures[1]` from `authorizedOracles`, ensuring distinct signers (`signer0 != signer1`) and preventing single-point-of-failure oracle risk.
 - **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers.
-- **Order State Machine & Gross Surcharge Accounting**: Explicit `enum OrderState { UNINITIALIZED, CREATED, FUNDED, SETTLED, REFUNDED }` with stored explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`).
-- **Zero Discretionary Admin Overrides**: Contract owner permissions restricted strictly to emergency circuit breaker pause/unpause. Funds remain completely immutable on-chain.
-- **Buyer-Triggered Refund**: Buyer can trigger a 100% refund (`grossAmount`) after fulfillment deadline timeout.
+- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `CREATED` -> `FUNDED` -> (`SETTLED`) OR (`REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`).
 
 ---
 
@@ -139,7 +148,7 @@ The FastAPI backend exposes fully documented OpenAPI endpoints. Access interacti
 | `POST` | `/api/v1/checkout/session` | Create checkout session |
 | `GET` | `/api/v1/checkout/session/{session_id}` | Retrieve checkout session status |
 | `POST` | `/api/v1/webhook/carrier-update` | Webhook for carrier shipping status updates |
-| `GET` | `/api/v1/order/{order_id}/voucher` | Generate EIP-712 release voucher upon delivery |
+| `POST` | `/api/v1/order/{order_id}/attestation` | Generate EIP-712 release voucher upon delivery attestation |
 
 ### Running the Backend Service:
 ```bash

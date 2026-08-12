@@ -220,8 +220,9 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
 
     /**
      * @notice Buyer-triggered refund after deadline expiry (claimRefund).
+     * @dev Note: Not restricted by whenNotPaused so refunds remain permanently accessible even when paused.
      */
-    function claimRefund(bytes32 orderId) external whenNotPaused nonReentrant {
+    function claimRefund(bytes32 orderId) external nonReentrant {
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
@@ -237,7 +238,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     /**
      * @dev Backward compatibility alias for refundTimeout.
      */
-    function refundTimeout(bytes32 orderId) external whenNotPaused nonReentrant {
+    function refundTimeout(bytes32 orderId) external nonReentrant {
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();

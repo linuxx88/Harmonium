@@ -79,19 +79,22 @@ def carrier_update_webhook(req: WebhookCarrierUpdateRequest):
                 updated_orders.append(order_id)
     return {"status": "success", "updated_orders": updated_orders}
 
-@app.get("/api/v1/order/{order_id}/voucher")
-def get_order_voucher(order_id: str, buyer: str):
+class AttestationRequest(BaseModel):
+    buyer: str
+
+@app.post("/api/v1/order/{order_id}/attestation")
+def create_order_attestation(order_id: str, req: AttestationRequest):
     if order_id not in tracked_orders:
         raise HTTPException(status_code=404, detail="Order not found")
     
     order = tracked_orders[order_id]
-    order["buyer"] = buyer
+    order["buyer"] = req.buyer
     
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
         sig = sign_escrow_release(
             order_id_hex=order["order_id"],
-            buyer=buyer,
+            buyer=req.buyer,
             seller=order["seller"],
             amount=order["amount"],
             oracle_private_key=ORACLE_PRIVATE_KEY
