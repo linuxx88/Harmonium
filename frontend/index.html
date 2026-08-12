@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decentralized Stripe - Payment Widget Demo</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --success: #10b981;
+    }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+    }
+    .checkout-card {
+      background: var(--card-bg);
+      padding: 2rem;
+      border-radius: 1rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      width: 100%;
+      max-width: 420px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .title {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-bottom: 1.5rem;
+    }
+    .price-tag {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--success);
+      margin-bottom: 1.5rem;
+    }
+    .btn {
+      width: 100%;
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.75rem 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      border-radius: 0.5rem;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-top: 1rem;
+    }
+    .btn:hover {
+      background: var(--accent-hover);
+    }
+    .status-box {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      background: rgba(255,255,255,0.05);
+      font-size: 0.85rem;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+<div class="checkout-card">
+  <div class="title">Decentralized Stripe</div>
+  <div class="subtitle">Trustless Web3 Escrow Payment</div>
+  
+  <div class="price-tag">100.00 USDC</div>
+
+  <div id="widget-container">
+    <button class="btn" id="connect-wallet-btn" onclick="connectWallet()">Connect Wallet</button>
+    <button class="btn" id="pay-btn" onclick="payWithEscrow()" style="display:none;">Pay with Escrow</button>
+    <button class="btn" id="release-btn" onclick="claimOracleRelease()" style="display:none;">Claim Oracle Release</button>
+  </div>
+
+  <div class="status-box" id="status-display">Wallet not connected</div>
+</div>
+
+<script>
+  let provider, signer, userAddress;
+  const BACKEND_URL = "http://localhost:8000";
+
+  async function connectWallet() {
+    if (window.ethereum) {
+      provider = new ethers.BrowserProvider(window.ethereum);
+      signer = await provider.getSigner();
+      userAddress = await signer.getAddress();
+      document.getElementById("status-display").innerText = `Connected: ${userAddress.substring(0, 6)}...${userAddress.substring(38)}`;
+      document.getElementById("connect-wallet-btn").style.display = "none";
+      document.getElementById("pay-btn").style.display = "block";
+    } else {
+      document.getElementById("status-display").innerText = "MetaMask or EVM provider not detected.";
+    }
+  }
+
+  async function payWithEscrow() {
+    document.getElementById("status-display").innerText = "Processing escrow deposit...";
+  }
+
+  async function claimOracleRelease() {
+    document.getElementById("status-display").innerText = "Querying oracle voucher...";
+  }
+</script>
+
+</body>
+</html>

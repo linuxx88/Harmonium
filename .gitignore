@@ -1,0 +1,25 @@
+node_modules/
+.env
+__pycache__/
+*.pyc
+.venv/
+cache/
+artifacts/
+out/
+coverage/
+coverage.json
+.env.local
+typechain/
+typechain-types/
+
+# Hardhat
+cache/
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
