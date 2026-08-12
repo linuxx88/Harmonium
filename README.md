@@ -1,33 +1,34 @@
 # Decentralized Stripe PoC
 
-A production-ready Proof of Concept (PoC) for decentralized, escrow-backed e-commerce payments on Ethereum Virtual Machine (EVM) compatible networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
+Permissionless USDC escrow infrastructure for e-commerce with verifiable delivery settlement on Ethereum Virtual Machine (EVM) compatible networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
 
 ---
 
 ## 📖 System Overview
 
-Decentralized Stripe enables trustless e-commerce transactions by leveraging EVM smart contracts, USDC stablecoins, and an automated FastAPI carrier oracle.
+Decentralized Stripe enables trustless e-commerce transactions by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
 
 ```
-+------------------+         1. Deposit USDC         +-------------------------+
-|                  | ------------------------------> |                         |
-|   Buyer Wallet   |                                 | Escrow Smart Contract   |
-|                  | <------------------------------ |                         |
-+------------------+         4. Auto Refund          +-------------------------+
-         |                      (if expired)                     ^
-         |                                                       | 3. ECDSA Release
-         | 2. Tracking ID                                        |    Signature
-         v                                                       |
-+------------------+      Carrier API Check          +-------------------------+
-|   Backend API    | ------------------------------> |  Oracle Settlement Engine|
-+------------------+                                 +-------------------------+
++------------------+         1. Deposit USDC + Surcharge      +-------------------------+
+|                  | ---------------------------------------> |                         |
+|   Buyer Wallet   |                                          | Escrow Smart Contract   |
+|                  | <--------------------------------------- |                         |
++------------------+         4. Buyer-Triggered Refund        +-------------------------+
+         |                        (After 7 Days)                         ^
+         |                                                               | 3. 2-of-3 EIP-712
+         | 2. Tracking ID                                                |    Threshold Vouchers
+         v                                                               |
++------------------+         Carrier API Check                +-------------------------+
+|   Backend API    | ---------------------------------------> | Multi-Oracle Threshold  |
++------------------+                                          +-------------------------+
 ```
 
 ### Key Security & Architecture Highlights
-- **0.1% Protocol Fee**: Built-in 10 bps fee model routed to configurable fee recipient.
-- **Automated Settlement**: FastAPI Oracle monitors shipping status (UPS / Canada Post) and signs cryptographic ECDSA authorization vouchers for instant settlement upon delivery.
-- **7-Day Auto-Refund Timeout**: Buyer can trigger full refund if seller fails to fulfill delivery within deadline.
-- **Dispute Resolution & Emergency Pause**: OpenZeppelin `Pausable` and `ReentrancyGuard` with owner-managed dispute resolution.
+- **EIP-712 Typed Data Signatures**: Replaced generic ECDSA signatures with structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `trackingHash`, `nonce`, `deadline`) to block cross-chain, cross-contract, and replay attacks.
+- **2-of-3 Threshold Oracle Quorum**: Multi-signature oracle attestation requirement eliminating single-point-of-failure oracle risk.
+- **Buyer Surcharge Fee Model**: Buyer pays exact item amount + 0.1% protocol surcharge ($100.10 total deposit -> $100.00 net seller payout + $0.10 fee).
+- **Zero Discretionary Admin Overrides**: Contract owner permissions restricted strictly to emergency circuit breaker pause/unpause. Funds remain completely immutable on-chain.
+- **Buyer-Triggered Refund**: Buyer can trigger a 100% refund (deposit + fee) after a 7-day fulfillment timeout.
 
 ---
 
@@ -36,11 +37,11 @@ Decentralized Stripe enables trustless e-commerce transactions by leveraging EVM
 ```
 DECENTRALIZED-STRIPE/
 ├── contracts/
-│   ├── DecentralizedStripeEscrow.sol   # Escrow core smart contract
+│   ├── DecentralizedStripeEscrow.sol   # EIP-712 & 2-of-3 threshold escrow core contract
 │   └── MockUSDC.sol                    # ERC-20 Mock USDC for test environments
 ├── backend/
 │   ├── main.py                         # FastAPI Oracle server & webhook listener
-│   ├── oracle.py                       # Carrier verification & ECDSA signature engine
+│   ├── oracle.py                       # Carrier verification & EIP-712 signature engine
 │   └── requirements.txt                # Python dependencies
 ├── frontend/
 │   ├── index.html                      # Embeddable checkout widget interface
@@ -50,9 +51,9 @@ DECENTRALIZED-STRIPE/
 │   ├── chaos_test.js                   # Network delay, invalid sig & pause chaos test suite
 │   └── simulate_flow.js                # End-to-end integration test runner
 ├── test/
-│   └── DecentralizedStripeEscrow.test.js # Hardhat unit tests
+│   └── DecentralizedStripeEscrow.test.js # Hardhat unit test suite
 ├── hardhat.config.js                   # Hardhat EVM compiler & network settings
-└── ARCHITECTURE.md                     # System design roadmap & task matrix
+└── ARCHITECTURE.md                     # System design roadmap & security specification
 ```
 
 ---
@@ -97,7 +98,7 @@ cd ..
 ## 🧪 Testing & Verification
 
 ### Hardhat Unit Tests
-Run full suite of smart contract unit tests covering happy paths, fee deduction, re-entrancy protection, and custom errors:
+Run full suite of smart contract unit tests covering EIP-712 signatures, 2-of-3 threshold quorum, buyer surcharge model, anti-replay nonces, and custom errors:
 
 ```bash
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat test
@@ -111,7 +112,7 @@ HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/chaos_test.js
 ```
 
 ### End-to-End Flow Simulation
-Run full lifecycle simulation from checkout deposit to carrier delivery and settlement:
+Run full lifecycle simulation from checkout deposit to 2-of-3 oracle carrier verification and settlement:
 
 ```bash
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/simulate_flow.js
@@ -131,7 +132,7 @@ The FastAPI backend exposes fully documented OpenAPI endpoints. Access interacti
 | `POST` | `/api/v1/checkout/session` | Create checkout session |
 | `GET` | `/api/v1/checkout/session/{session_id}` | Retrieve checkout session status |
 | `POST` | `/api/v1/webhook/carrier-update` | Webhook for carrier shipping status updates |
-| `GET` | `/api/v1/order/{order_id}/voucher` | Generate ECDSA release voucher upon delivery |
+| `GET` | `/api/v1/order/{order_id}/voucher` | Generate EIP-712 release voucher upon delivery |
 
 ### Running the Backend Service:
 ```bash
@@ -151,14 +152,14 @@ HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --netwo
 
 ### Verification Command
 ```bash
-npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "<ORACLE_ADDRESS>" "<FEE_RECIPIENT>"
+npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "[\"<ORACLE1>\",\"<ORACLE2>\",\"<ORACLE3>\"]" "<FEE_RECIPIENT>"
 ```
 
 ---
 
 ## 🛡 Security & Audit Compliance
 
-- Zero hardcoded private keys or sensitive credentials in source code.
-- All secrets strictly dynamically parsed via `.env`.
-- SafeERC20 for token transfer protection against non-standard ERC-20s.
-- Re-entrancy protection across all external state-mutating methods.
+- **Zero Hardcoded Keys**: Private keys loaded exclusively via environment variables.
+- **EIP-712 Typed Hashing**: Complete domain separation preventing cross-chain and replay exploits.
+- **SafeERC20 Protection**: Guarded against non-standard ERC-20 transfer behaviors.
+- **Re-entrancy Guard**: Non-reentrant modifiers on all state-changing entrypoints.
