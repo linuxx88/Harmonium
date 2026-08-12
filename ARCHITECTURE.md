@@ -38,7 +38,7 @@
 - Secp256k1 ECDSA & EIP-712 Cryptographic Standards
 
 ### Assumed Honest
-- At least 2 out of 3 independent oracle signing keys
+- 2-of-3 Threshold Oracle Quorum: settlement requires signatures from two distinct authorized oracle identities. The security model assumes fewer than two authorized oracle keys are compromised or colluding.
 - Shipping carrier tracking APIs (Canada Post / UPS)
 
 ### Not Trusted
@@ -48,7 +48,7 @@
 - Backend API Server
 - Contract Administrator / Owner
 
-## Explicit 10 Security Invariants
+## Explicit 11 Security Invariants
 1. **Invariant 1**: A settled order can never be refunded (`SETTLED` -> `REFUNDED` is strictly forbidden).
 2. **Invariant 2**: A refunded order can never be settled (`REFUNDED` -> `SETTLED` is strictly forbidden).
 3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund` restricts caller to `order.buyer`).
@@ -59,17 +59,16 @@
 8. **Invariant 8**: The seller can never withdraw funds before settlement (funds locked in contract until valid settlement state transition).
 9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
 10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters (`feeAmount = itemPrice * PROTOCOL_FEE_BPS / BPS_DENOMINATOR`).
+11. **Invariant 11**: A settlement voucher is valid ONLY for the exact order parameters stored on-chain (orderId, buyer, seller, token, amount, carrierId, trackingHash, nonce, voucherDeadline).
 
 ## Cryptographic & Deadline Specifications
-- **Decoupled Deadlines**: `fulfillmentDeadline` (order-level timeout, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 signature window validity).
+- **Decoupled Deadlines**: `fulfillmentDeadline` (order-level expiration for buyer refunds, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 cryptographic signature validity window). Nonces are scoped strictly per order via `usedNonces[orderId][nonce] = true`.
 - **Explicit Carrier Data**: Struct includes `carrierId` and `trackingHash` directly inside EIP-712 typed voucher (`ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 amount,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)`).
 
 ## State Machine Strict Transition Rules
 - **Allowed Transitions**:
-  - `UNINITIALIZED` -> `CREATED` (or `FUNDED` directly on initial deposit)
-  - `CREATED` -> `FUNDED`
-  - `FUNDED` -> `SETTLED`
-  - `FUNDED` -> `REFUNDED`
+  - `UNINITIALIZED` -> `CREATED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`)
+  - Note: Initial deposit moves order to `FUNDED`. Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
 - **Forbidden Transitions**:
   - `CREATED` -> `REFUNDED`
   - `CREATED` -> `SETTLED`
@@ -78,7 +77,7 @@
   - `REFUNDED` -> `ANY`
 
 ## Circuit Breaker & Pause Rules
-- **Paused Functions (`whenNotPaused`)**: `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer`, `releaseByBuyer`.
+- **Paused Functions (`whenNotPaused`)**: `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer`.
 - **Unpaused Functions (`whenPaused` allowed)**: `claimRefund` remains permanently accessible when paused.
 - **Invariant Notice**: Emergency pause must never create indefinite custody of user funds. Buyer refunds remain permanently accessible after fulfillment deadline expiry even when the contract is paused.
 

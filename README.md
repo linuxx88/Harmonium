@@ -35,7 +35,7 @@ Decentralized Stripe enables non-custodial, permissionless e-commerce escrow wit
 ```
 
 ### Key Non-Custodial Invariants & Security Highlights
-- **10 Explicit Security Invariants**:
+- **11 Explicit Security Invariants**:
   1. **Invariant 1**: A settled order can never be refunded.
   2. **Invariant 2**: A refunded order can never be settled.
   3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund`).
@@ -46,14 +46,15 @@ Decentralized Stripe enables non-custodial, permissionless e-commerce escrow wit
   8. **Invariant 8**: The seller can never withdraw funds before settlement.
   9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
   10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters.
+  11. **Invariant 11**: A settlement voucher is valid ONLY for the exact order parameters stored on-chain (orderId, buyer, seller, token, amount, carrierId, trackingHash, nonce, voucherDeadline).
 - **Circuit Breaker Pause Rules**:
-  - `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer`, `releaseByBuyer` are paused during circuit breaker activation.
+  - `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer` are paused during circuit breaker activation.
   - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds.
 - **Race Condition Resolution**: On-chain transaction ordering determines state. Whichever valid transaction (`SETTLED` or `REFUNDED`) hits the block first seals the terminal state.
 - **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.
-- **2-of-3 Threshold Oracle Quorum**: Multi-signature oracle attestation requirement verifying `signatures[0]` and `signatures[1]` from `authorizedOracles`, ensuring distinct signers (`signer0 != signer1`) and preventing single-point-of-failure oracle risk.
+- **2-of-3 Threshold Oracle Quorum**: settlement requires signatures from two distinct authorized oracle identities. The security model assumes fewer than two authorized oracle keys are compromised or colluding.
 - **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers alongside explicit `carrierId`.
-- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `UNINITIALIZED` -> `FUNDED` -> (`SETTLED`) OR (`REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`).
+- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `UNINITIALIZED` -> `CREATED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`). Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
 
 ---
 

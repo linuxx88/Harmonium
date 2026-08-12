@@ -229,17 +229,6 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     }
 
     /**
-     * @notice Alias for confirmReceiptByBuyer for backwards compatibility.
-     */
-    function releaseByBuyer(bytes32 orderId) external whenNotPaused nonReentrant {
-        EscrowOrder storage order = orders[orderId];
-        if (order.state != OrderState.FUNDED) revert InvalidStatus();
-        if (msg.sender != order.buyer) revert Unauthorized();
-
-        _executeSettlement(order);
-    }
-
-    /**
      * @notice Buyer-triggered refund after fulfillment deadline expiry (claimRefund).
      * @dev Note: Not restricted by whenNotPaused so refunds remain permanently accessible even when paused.
      */
