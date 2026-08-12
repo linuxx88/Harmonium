@@ -4,9 +4,10 @@ from typing import Dict, Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from backend.oracle import verify_carrier_status, sign_eip712_release_voucher, compute_tracking_hash
+from web3 import Web3
+from backend.oracle import verify_carrier_status, compute_tracking_hash, OracleSignerNode
 
-app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Service", version="1.0.0")
+app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Network Service", version="1.0.0")
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000,http://127.0.0.1:3000").split(",")
 
@@ -22,15 +23,15 @@ checkout_sessions: Dict[str, dict] = {}
 tracked_orders: Dict[str, dict] = {}
 order_nonces: Dict[str, int] = {}
 
-# Load 3 oracle private keys for true 2-of-3 threshold quorum
-ORACLE_KEYS: List[str] = []
-for key_name in ["ORACLE1_PRIVATE_KEY", "ORACLE2_PRIVATE_KEY", "ORACLE3_PRIVATE_KEY"]:
-    val = os.getenv(key_name)
-    if val:
-        ORACLE_KEYS.append(val)
+# Initialize independent Oracle Signer Nodes
+ORACLE_NODES: List[OracleSignerNode] = []
+for idx, key_name in enumerate(["ORACLE1_PRIVATE_KEY", "ORACLE2_PRIVATE_KEY", "ORACLE3_PRIVATE_KEY"], start=1):
+    pk = os.getenv(key_name)
+    if pk:
+        ORACLE_NODES.append(OracleSignerNode(node_id=f"oracle-node-{idx}", private_key=pk))
 
-if len(ORACLE_KEYS) < 2:
-    raise RuntimeError("Insufficient oracle keys configured! At least 2 of 3 oracle private keys (ORACLE1_PRIVATE_KEY, ORACLE2_PRIVATE_KEY, ORACLE3_PRIVATE_KEY) are required for threshold quorum.")
+if len(ORACLE_NODES) < 2:
+    raise RuntimeError("Insufficient active oracle nodes! At least 2 independent oracle node private keys (ORACLE1_PRIVATE_KEY, ORACLE2_PRIVATE_KEY, ORACLE3_PRIVATE_KEY) are required for threshold quorum.")
 
 class CheckoutSessionRequest(BaseModel):
     order_id: str
@@ -50,23 +51,21 @@ class AttestationRequest(BaseModel):
 def read_root():
     return {
         "status": "online",
-        "service": "Decentralized Stripe 2-of-3 Threshold Oracle Service",
-        "active_oracle_signers_count": len(ORACLE_KEYS),
+        "service": "Decentralized Stripe 2-of-3 Threshold Oracle Network Service",
+        "active_oracle_nodes_count": len(ORACLE_NODES),
+        "node_addresses": [node.address for node in ORACLE_NODES],
         "threshold_required": 2
     }
 
 @app.post("/api/v1/checkout/session")
 def create_checkout_session(req: CheckoutSessionRequest):
-    # 1. Validate EVM address formats
     for field_name, addr in [("buyer", req.buyer), ("seller", req.seller), ("token", req.token), ("contract_address", req.contract_address)]:
         if not Web3.is_address(addr):
             raise HTTPException(status_code=400, detail=f"Invalid EVM address format for {field_name}: {addr}")
 
-    # 2. Validate price and chain parameters
     if req.item_price <= 0 or req.chain_id <= 0:
         raise HTTPException(status_code=400, detail="item_price and chain_id must be positive integers!")
 
-    # 3. Validate Immutable Protocol Surcharge Fee Accounting (10 bps = 0.1%)
     expected_fee = (req.item_price * 10) // 10000
     if req.gross_amount != req.item_price + expected_fee:
         raise HTTPException(
@@ -105,7 +104,6 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
     
     order = tracked_orders[order_id]
     
-    # Enforce strict buyer identity verification matching pre-bound checkout session buyer
     if order.get("buyer") and req.buyer.lower() != order["buyer"].lower():
         raise HTTPException(status_code=400, detail="Buyer address mismatch! Cannot generate attestation for unauthorized buyer identity.")
     
@@ -120,12 +118,12 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
         tracking_id = order.get("tracking_id", "TRACK123")
         tracking_hash = compute_tracking_hash(carrier_id, tracking_id)
 
-        # Dynamically generate threshold signatures from 2 available distinct oracle keys
-        selected_keys = ORACLE_KEYS[:2]
+        # Collect threshold attestations independently from available active OracleSignerNode instances
+        quorum_attestations = []
         signatures = []
 
-        for oracle_pk in selected_keys:
-            sig = sign_eip712_release_voucher(
+        for node in ORACLE_NODES[:2]:
+            attestation = node.sign_release_voucher(
                 contract_address=order["contract_address"],
                 chain_id=order["chain_id"],
                 order_id_hex=order["order_id"],
@@ -137,19 +135,20 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
                 carrier_id=carrier_id,
                 tracking_hash_hex=tracking_hash,
                 nonce=current_nonce,
-                voucher_deadline=voucher_deadline,
-                oracle_private_key=oracle_pk
+                voucher_deadline=voucher_deadline
             )
-            signatures.append(sig)
+            quorum_attestations.append(attestation)
+            signatures.append(attestation["signature"])
 
         order["signatures"] = signatures
+        order["quorum_attestations"] = quorum_attestations
         order["voucher_deadline"] = voucher_deadline
         order["nonce"] = current_nonce
         order["status"] = "ready_for_release"
         return {
             "status": "success",
             "threshold_met": True,
-            "signatures_provided": len(signatures),
+            "quorum_count": len(signatures),
             "order": order
         }
 
