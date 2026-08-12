@@ -54,7 +54,8 @@ async function main() {
       { name: "buyer", type: "address" },
       { name: "seller", type: "address" },
       { name: "token", type: "address" },
-      { name: "amount", type: "uint256" },
+      { name: "grossAmount", type: "uint256" },
+      { name: "itemPrice", type: "uint256" },
       { name: "carrierId", type: "string" },
       { name: "trackingHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
@@ -67,7 +68,8 @@ async function main() {
     buyer: buyer.address,
     seller: seller.address,
     token: usdc.address,
-    amount: itemPrice,
+    grossAmount: grossAmount,
+    itemPrice: itemPrice,
     carrierId: carrierId,
     trackingHash: trackingHash,
     nonce: 1,
@@ -78,7 +80,7 @@ async function main() {
   const sig2 = await oracle2._signTypedData(domain, types, value);
 
   // 5. Execute 2-of-3 threshold release
-  await escrow.releaseWithOracle(orderId, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
+  await escrow.releaseWithOracle(orderId, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
 
   const sellerBalance = await usdc.balanceOf(seller.address);
   const feeBalance = await usdc.balanceOf(feeRecipient.address);
@@ -98,4 +100,3 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-
