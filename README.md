@@ -36,6 +36,10 @@ UNINITIALIZED
     └── buyer confirmation ────────────────> SETTLED
 ```
 
+> [!NOTE]
+> **Zero-Config Persistent Storage**: Off-chain order state, checkout sessions, anti-replay nonces, voucher deadlines, and EIP-712 threshold signatures are persistently managed via a local SQLite database (`decentralized_stripe.db` via `backend/database.py`). This guarantees state survival across FastAPI service restarts without requiring external database server dependencies.
+
+
 ### 🔒 Trust Model & Custodial Boundaries
 
 > [!IMPORTANT]
@@ -101,6 +105,7 @@ DECENTRALIZED-STRIPE/
 │   ├── DecentralizedStripeEscrow.sol   # Non-custodial EIP-712 & 2-of-3 threshold escrow core contract
 │   └── MockUSDC.sol                    # ERC-20 Mock USDC for test environments
 ├── backend/
+│   ├── database.py                     # SQLite persistence layer & thread-safe CRUD interface
 │   ├── main.py                         # FastAPI Oracle server & webhook listener
 │   ├── oracle.py                       # Carrier verification & EIP-712 signature engine
 │   └── requirements.txt                # Python dependencies

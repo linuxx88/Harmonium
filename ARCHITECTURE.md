@@ -120,10 +120,17 @@ To maintain strict compliance with **Invariant 9** (*No privileged account can a
 - `POST /api/v1/webhook/carrier-update` -> Carrier shipping status webhook updates.
 - `POST /api/v1/order/{order_id}/attestation` -> Submit delivery attestation request & generate EIP-712 release voucher.
 
+## Off-Chain State Persistence Layer
+- **Storage Engine**: Zero-config local SQLite3 database (`backend/decentralized_stripe.db`).
+- **Managed Entity (`orders` table)**: Persists `order_id`, `session_id`, `buyer`, `seller`, `item_price`, `gross_amount`, `token`, `contract_address`, `chain_id`, `tracking_id`, `status`, `nonce`, `voucher_deadline`, `signatures` (JSON list), and `created_at`.
+- **Lifecycle Integration**: Initialized via `init_db()` on FastAPI `startup` lifecycle event (`on_startup` in `backend/main.py`).
+- **Security & Reliability**: Thread-safe connection factory (`get_db_connection()`), SQL parameterization (`?`) preventing SQL injection vulnerabilities, and complete state recovery across server restarts.
+
 ## System Components
 - **Smart Contracts (EVM)**: Hardened ERC-20 Escrow with EIP-712 structured signatures, 2-of-3 threshold oracle verification, buyer fee surcharge model, per-order anti-replay nonces, explicit gross surcharge accounting, and zero discretionary admin overrides.
-- **Backend (FastAPI + web3.py)**: Multi-node oracle engine monitoring on-chain events, shipping carrier APIs, and generating cryptographic EIP-712 release vouchers signed by distinct oracle nodes (`ORACLE1_PRIVATE_KEY`, `ORACLE2_PRIVATE_KEY`, `ORACLE3_PRIVATE_KEY`).
+- **Backend (FastAPI + web3.py + SQLite)**: Multi-node oracle engine monitoring on-chain events, shipping carrier APIs, managing persistent order state via SQLite (`backend/database.py`), and generating cryptographic EIP-712 release vouchers signed by distinct oracle nodes (`ORACLE1_PRIVATE_KEY`, `ORACLE2_PRIVATE_KEY`, `ORACLE3_PRIVATE_KEY`).
 - **Frontend (Vanilla HTML/JS)**: Embeddable checkout widget interacting with EVM wallets and backend oracle endpoints.
 - **Scripts**: Automated testnet deployment (`deploy_testnet.js`), E2E flow simulation (`simulate_flow.js`), and security chaos test suite (`chaos_test.js`).
+
 
 
