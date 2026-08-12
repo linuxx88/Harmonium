@@ -7,6 +7,17 @@ Non-custodial, permissionless e-commerce escrow with cryptographically verified 
 
 ---
 
+## 🎯 Target Engineering Roles & Capability Mapping
+
+This repository is engineered as a production-grade benchmark demonstrating competency across 4 core Web3 engineering specializations:
+
+1. **Solidity / Smart Contract Developer**: Hardened state machines, OpenZeppelin integration, `ReentrancyGuard`, `Pausable`, `SafeERC20`, and EIP-712 cryptographic verification (`DecentralizedStripeEscrow.sol`).
+2. **Web3 Payment Developer**: Non-custodial USDC payment flows, atomic buyer-paid fee surcharges, settlement/refund lifecycle management, and stablecoin escrow mechanics.
+3. **Blockchain Security Developer**: Strict mathematical invariants, cross-chain domain separation, per-order anti-replay nonces, circuit breaker pause logic, property-based fuzzing, and adversarial chaos testing.
+4. **Full-Stack Web3 Developer**: End-to-end integration spanning HTML5/Ethers.js frontend, Web3 wallet widget, smart contract state, Python FastAPI oracle backend, EIP-712 signing engine, and Web2 carrier webhooks.
+
+---
+
 ## 📖 System Overview
 
 Decentralized Stripe enables non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
@@ -25,24 +36,55 @@ UNINITIALIZED
     └── buyer confirmation ────────────────> SETTLED
 ```
 
+### 🔒 Trust Model & Custodial Boundaries
+
+> [!IMPORTANT]
+> **Non-Custodial Escrow vs Oracle Attestation**:
+> - **Funds Custody (100% Non-Custodial)**: Zero admin custody. Neither the contract owner nor protocol operators can arbitrarily transfer, freeze, or confiscate escrowed funds (`Invariant 9`). Funds can ONLY move via valid 2-of-3 threshold oracle settlement or buyer action (`Invariant 3`, `Invariant 4`).
+> - **Delivery Attestation (2-of-3 Threshold Trust Assumption)**: Automated release relies on Web2 carrier webhooks signed by a 2-of-3 threshold oracle quorum. The security model explicitly assumes **fewer than 2 out of 3 authorized oracle keys are compromised or colluding**.
+
+```
+Funds Custody Boundary:
+  Funds → Smart Contract → Zero Administrator Custody (Non-Custodial)
+
+Delivery Attestation Boundary:
+  Delivery Event → 2-of-3 Oracle Quorum → Cryptographic Release Voucher (Trust Assumption)
+```
+
+### ⚠️ Trust Assumptions & System Limitations
+
+To ensure absolute technical transparency, this protocol explicitly defines its operational boundaries and assumptions:
+
+- **EVM & Smart Contract Integrity**: The escrow smart contract logic is assumed to be deployed immutably and compiled with standard EVM rules (`^0.8.20`).
+- **Standard Token Interface**: The underlying USDC/ERC-20 token contract is assumed to strictly conform to standard IERC20 transfer/balance interfaces.
+- **Oracle Quorum Honesty**: At least 2 out of the 3 authorized oracle signing identities are assumed to remain uncompromised, non-colluding, and online.
+- **Physical-World Oracle Risk**: Carrier delivery APIs (e.g. UPS/FedEx webhooks) are external physical-world data providers; carrier API key compromises or falsified tracking statuses at the carrier level cannot be independently verified on-chain.
+- **Off-Chain Key Security**: Oracle private keys must be stored in secure HSMs/KMS modules; key storage security is an off-chain operational dependency.
+- **Unaudited PoC Status**: This codebase is a security-focused Proof of Concept (PoC) and has not undergone an independent third-party audit. It MUST NOT be deployed with production mainnet funds.
+
 ### Key Non-Custodial Invariants & Security Highlights
-- **11 Explicit Security Invariants**:
-  1. **Invariant 1**: A settled order can never be refunded.
-  2. **Invariant 2**: A refunded order can never be settled.
-  3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund`).
-  4. **Invariant 4**: Settlement can occur via EITHER (2-of-3 Oracle Quorum threshold release) OR (Direct Voluntary Buyer Confirmation via `confirmReceiptByBuyer`).
-  5. **Invariant 5**: A settlement voucher nonce is scoped per order (`usedNonces[orderId][nonce]`) and can only be used once to prevent cross-order replay attacks.
-  6. **Invariant 6**: A voucher cannot be replayed on another chain (`chainId` in EIP-712 domain).
-  7. **Invariant 7**: A voucher cannot be replayed on another escrow contract (`verifyingContract` address in EIP-712 domain).
-  8. **Invariant 8**: The seller can never withdraw funds before settlement.
-  9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
-  10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters.
-  11. **Invariant 11**: A settlement voucher is valid ONLY for the exact order parameters stored on-chain (orderId, buyer, seller, token, amount, carrierId, trackingHash, nonce, voucherDeadline).
+- **12 Explicit Security Invariants & Test Verification Matrix**:
+
+| ID | Invariant Name | Rule Description | Hardhat Test Target | Verification Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **INV-1** | Settled cannot refund | Settled order can never be refunded | `test_settled_order_cannot_be_refunded` | `PASSED` |
+| **INV-2** | Refunded cannot settle | Refunded order can never be settled | `test_refunded_order_cannot_settle` | `PASSED` |
+| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` | `test_only_buyer_can_claim_refund` | `PASSED` |
+| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm | `test_settlement_quorum_or_buyer_only` | `PASSED` |
+| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order | `test_voucher_cannot_cross_orders` | `PASSED` |
+| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` | `test_voucher_domain_chain_separation` | `PASSED` |
+| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` | `test_voucher_verifying_contract_isolation` | `PASSED` |
+| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `test_seller_cannot_withdraw_pre_settlement` | `PASSED` |
+| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds | `test_admin_has_no_fund_transfer_authority` | `PASSED` |
+| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount | `test_fee_parameters_are_immutable` | `PASSED` |
+| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `test_voucher_must_match_order_parameters` | `PASSED` |
+| **INV-12** | Circuit breaker override | `claimRefund` accessible when paused | `test_refund_accessible_when_paused` | `PASSED` |
+
 - **Circuit Breaker Pause Rules**:
   - `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer` are paused during circuit breaker activation.
-  - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds.
+  - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds (`INV-12`).
 - **Race Condition Resolution**: On-chain transaction ordering determines state. Whichever valid transaction (`SETTLED` or `REFUNDED`) hits the block first seals the terminal state.
-- **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.
+- **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `grossAmount`, `itemPrice`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.
 - **2-of-3 Threshold Oracle Quorum**: settlement requires signatures from two distinct authorized oracle identities. The security model assumes fewer than two authorized oracle keys are compromised or colluding.
 - **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers alongside explicit `carrierId`.
 - **Order State Machine & Gross Surcharge Accounting**: Strict atomic state machine `UNINITIALIZED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`) via `createAndFundOrder` with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`). Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.

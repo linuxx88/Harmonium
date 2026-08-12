@@ -4,7 +4,8 @@
   "description": "Decentralized Stripe PoC Smart Contracts",
   "scripts": {
     "test": "hardhat test",
-    "compile": "hardhat compile"
+    "compile": "hardhat compile",
+    "demo": "CI=true hardhat run scripts/demo.js"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
