@@ -4,7 +4,7 @@ from typing import Dict, Optional, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from backend.oracle import verify_carrier_status, sign_eip712_release_voucher
+from backend.oracle import verify_carrier_status, sign_eip712_release_voucher, compute_tracking_hash
 
 app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Service", version="1.0.0")
 
@@ -89,7 +89,8 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
         voucher_deadline = int(time.time()) + 3600
         nonce = 1
         carrier_id = carrier_info.get("carrier", "UPS")
-        tracking_hash = "0x" + "0" * 64
+        tracking_id = order.get("tracking_id", "TRACK123")
+        tracking_hash = compute_tracking_hash(carrier_id, tracking_id)
 
         # Dynamically generate threshold signatures from 2 available distinct oracle keys
         selected_keys = ORACLE_KEYS[:2]

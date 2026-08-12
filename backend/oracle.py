@@ -1,5 +1,6 @@
 import os
 from eth_account import Account
+from eth_abi import encode
 from web3 import Web3
 
 MOCK_SHIPPING_DB = {
@@ -10,6 +11,13 @@ MOCK_SHIPPING_DB = {
 
 def verify_carrier_status(tracking_id: str) -> dict:
     return MOCK_SHIPPING_DB.get(tracking_id, {"status": "NOT_FOUND", "carrier": "UNKNOWN"})
+
+def compute_tracking_hash(carrier_id: str, tracking_number: str) -> str:
+    """
+    Computes keccak256(abi.encode(carrierId, trackingNumber)) matching Solidity implementation.
+    """
+    encoded_bytes = encode(['string', 'string'], [carrier_id, tracking_number])
+    return "0x" + Web3.keccak(encoded_bytes).hex()
 
 def sign_eip712_release_voucher(
     contract_address: str,
