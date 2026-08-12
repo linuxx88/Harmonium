@@ -28,7 +28,8 @@ async function main() {
 
   // 3. Buyer approves and deposits
   const orderId = ethers.utils.id("ORDER_SIM_999");
-  const trackingHash = await escrow.computeTrackingHash("UPS", "TRACK123");
+  const carrierId = "UPS";
+  const trackingHash = await escrow.computeTrackingHash(carrierId, "TRACK123");
   await usdc.connect(buyer).approve(escrow.address, grossAmount);
 
   const tx = await escrow.connect(buyer).deposit(orderId, seller.address, itemPrice);
@@ -38,7 +39,7 @@ async function main() {
   // 4. Generate 2-of-3 EIP-712 signatures
   const chainId = (await ethers.provider.getNetwork()).chainId;
   const block = await ethers.provider.getBlock("latest");
-  const deadline = block.timestamp + 3600;
+  const voucherDeadline = block.timestamp + 3600;
 
   const domain = {
     name: "DecentralizedStripeEscrow",
@@ -54,9 +55,10 @@ async function main() {
       { name: "seller", type: "address" },
       { name: "token", type: "address" },
       { name: "amount", type: "uint256" },
+      { name: "carrierId", type: "string" },
       { name: "trackingHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
-      { name: "deadline", type: "uint256" }
+      { name: "voucherDeadline", type: "uint256" }
     ]
   };
 
@@ -66,16 +68,17 @@ async function main() {
     seller: seller.address,
     token: usdc.address,
     amount: itemPrice,
+    carrierId: carrierId,
     trackingHash: trackingHash,
     nonce: 1,
-    deadline: deadline
+    voucherDeadline: voucherDeadline
   };
 
   const sig1 = await oracle1._signTypedData(domain, types, value);
   const sig2 = await oracle2._signTypedData(domain, types, value);
 
   // 5. Execute 2-of-3 threshold release
-  await escrow.releaseWithOracle(orderId, trackingHash, deadline, [sig1, sig2]);
+  await escrow.releaseWithOracle(orderId, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
 
   const sellerBalance = await usdc.balanceOf(seller.address);
   const feeBalance = await usdc.balanceOf(feeRecipient.address);
@@ -95,3 +98,4 @@ main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
+

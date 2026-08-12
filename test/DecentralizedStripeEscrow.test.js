@@ -26,7 +26,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
     }
   }
 
-  async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, amount, trackingHash, nonce, deadline) {
+  async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, amount, carrierId, trackingHash, nonce, voucherDeadline) {
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const domain = {
       name: "DecentralizedStripeEscrow",
@@ -42,9 +42,10 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
         { name: "seller", type: "address" },
         { name: "token", type: "address" },
         { name: "amount", type: "uint256" },
+        { name: "carrierId", type: "string" },
         { name: "trackingHash", type: "bytes32" },
         { name: "nonce", type: "uint256" },
-        { name: "deadline", type: "uint256" }
+        { name: "voucherDeadline", type: "uint256" }
       ]
     };
 
@@ -54,9 +55,10 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       seller: sellerAddr,
       token: tokenAddr,
       amount: amount,
+      carrierId: carrierId,
       trackingHash: trackingHash,
       nonce: nonce,
-      deadline: deadline
+      voucherDeadline: voucherDeadline
     };
 
     return await signer._signTypedData(domain, types, value);
@@ -105,7 +107,6 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       expect(order.feeAmount.toString()).to.equal(FEE_AMOUNT.toString());
       expect(order.grossAmount.toString()).to.equal(GROSS_AMOUNT.toString());
       expect(order.state).to.equal(2); // OrderState.FUNDED
-      expect(order.nonce.toString()).to.equal("1");
     });
 
     it("Should correctly compute carrier tracking hash", async function () {
@@ -121,19 +122,19 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
 
     it("Should release escrow when 2-of-3 valid oracle EIP-712 signatures are provided", async function () {
       const block = await ethers.provider.getBlock("latest");
-      const deadline = block.timestamp + 3600;
+      const voucherDeadline = block.timestamp + 3600;
 
       const sig1 = await createEIP712Signature(
-        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
       const sig2 = await createEIP712Signature(
-        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
 
       const initialSellerBalance = await mockUSDC.balanceOf(seller.address);
       const initialFeeBalance = await mockUSDC.balanceOf(feeRecipient.address);
 
-      await escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sig2]);
+      await escrow.releaseWithOracle(ORDER_ID, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]);
 
       const finalSellerBalance = await mockUSDC.balanceOf(seller.address);
       const finalFeeBalance = await mockUSDC.balanceOf(feeRecipient.address);
@@ -147,13 +148,13 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
 
     it("Should revert if only 1 signature is provided (Quorum check)", async function () {
       const block = await ethers.provider.getBlock("latest");
-      const deadline = block.timestamp + 3600;
+      const voucherDeadline = block.timestamp + 3600;
       const sig1 = await createEIP712Signature(
-        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
 
       await expectRevertCustomError(
-        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1]),
+        escrow.releaseWithOracle(ORDER_ID, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1]),
         escrow,
         "InvalidQuorum"
       );
@@ -161,13 +162,13 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
 
     it("Should revert on duplicate signatures from the same oracle signer", async function () {
       const block = await ethers.provider.getBlock("latest");
-      const deadline = block.timestamp + 3600;
+      const voucherDeadline = block.timestamp + 3600;
       const sig1 = await createEIP712Signature(
-        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
 
       await expectRevertCustomError(
-        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sig1]),
+        escrow.releaseWithOracle(ORDER_ID, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig1]),
         escrow,
         "DuplicateSignature"
       );
@@ -175,32 +176,32 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
 
     it("Should revert on unauthorized attacker signature", async function () {
       const block = await ethers.provider.getBlock("latest");
-      const deadline = block.timestamp + 3600;
+      const voucherDeadline = block.timestamp + 3600;
       const sig1 = await createEIP712Signature(
-        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
       const sigAttacker = await createEIP712Signature(
-        attacker, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, deadline
+        attacker, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
       );
 
       await expectRevertCustomError(
-        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sigAttacker]),
+        escrow.releaseWithOracle(ORDER_ID, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sigAttacker]),
         escrow,
         "InvalidSignature"
       );
     });
 
-    it("Should revert on expired signature deadline", async function () {
+    it("Should revert on expired signature voucherDeadline", async function () {
       const expiredDeadline = Math.floor(Date.now() / 1000) - 100;
       const sig1 = await createEIP712Signature(
-        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, expiredDeadline
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, expiredDeadline
       );
       const sig2 = await createEIP712Signature(
-        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, TRACKING_HASH, 1, expiredDeadline
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, expiredDeadline
       );
 
       await expectRevertCustomError(
-        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, expiredDeadline, [sig1, sig2]),
+        escrow.releaseWithOracle(ORDER_ID, CARRIER_ID, TRACKING_HASH, 1, expiredDeadline, [sig1, sig2]),
         escrow,
         "SignatureExpired"
       );
@@ -212,21 +213,21 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       await escrow.connect(buyer).deposit(ORDER_ID, seller.address, ITEM_PRICE);
     });
 
-    it("Should allow buyer to directly release payment to seller", async function () {
-      await escrow.connect(buyer).releaseByBuyer(ORDER_ID);
+    it("Should allow buyer to directly confirm receipt and release payment to seller", async function () {
+      await escrow.connect(buyer).confirmReceiptByBuyer(ORDER_ID);
       const order = await escrow.orders(ORDER_ID);
       expect(order.state).to.equal(3); // OrderState.SETTLED
     });
 
-    it("Should revert non-buyer attempt for direct release", async function () {
+    it("Should revert non-buyer attempt for direct receipt confirmation", async function () {
       await expectRevertCustomError(
-        escrow.connect(seller).releaseByBuyer(ORDER_ID),
+        escrow.connect(seller).confirmReceiptByBuyer(ORDER_ID),
         escrow,
         "Unauthorized"
       );
     });
 
-    it("Should allow buyer claimRefund after timeout expiry", async function () {
+    it("Should allow buyer claimRefund after fulfillment timeout expiry", async function () {
       await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
       await ethers.provider.send("evm_mine");
 
@@ -241,7 +242,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
     });
 
     it("Should enforce irreversible terminal state (cannot refund after SETTLED)", async function () {
-      await escrow.connect(buyer).releaseByBuyer(ORDER_ID);
+      await escrow.connect(buyer).confirmReceiptByBuyer(ORDER_ID);
 
       await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
       await ethers.provider.send("evm_mine");
@@ -260,7 +261,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       await escrow.connect(buyer).claimRefund(ORDER_ID);
 
       await expectRevertCustomError(
-        escrow.connect(buyer).releaseByBuyer(ORDER_ID),
+        escrow.connect(buyer).confirmReceiptByBuyer(ORDER_ID),
         escrow,
         "InvalidStatus"
       );
@@ -288,3 +289,4 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
     });
   });
 });
+

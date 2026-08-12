@@ -12,7 +12,9 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 /**
  * @title DecentralizedStripeEscrow
  * @notice Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement.
- * @dev Hardened with EIP-712 structured vouchers, 2-of-3 threshold oracle verification, buyer-paid fee surcharges, and anti-replay nonces.
+ * @dev Hardened with EIP-712 structured vouchers, 2-of-3 threshold oracle verification, buyer-paid fee surcharges, and per-order anti-replay nonces.
+ * 
+ * DISCLAIMER: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
  */
 contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712 {
     using SafeERC20 for IERC20;
@@ -28,13 +30,12 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         uint256 feeAmount;
         uint256 grossAmount;
         uint256 createdAt;
-        uint256 deadline;
-        uint256 nonce;
+        uint256 fulfillmentDeadline;
         OrderState state;
     }
 
     bytes32 public constant RELEASE_VOUCHER_TYPEHASH = keccak256(
-        "ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 amount,bytes32 trackingHash,uint256 nonce,uint256 deadline)"
+        "ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 amount,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)"
     );
 
     IERC20 public immutable usdcToken;
@@ -48,6 +49,8 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     mapping(address => bool) public isOracleSigner;
 
     mapping(bytes32 => EscrowOrder) public orders;
+    // Per-order settlement nonce anti-replay mapping: orderId => nonce => used
+    mapping(bytes32 => mapping(uint256 => bool)) public usedNonces;
 
     event OrderCreated(bytes32 indexed orderId, address indexed buyer, address indexed seller, uint256 itemPrice);
     event PaymentDeposited(
@@ -75,6 +78,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     error SignatureExpired();
     error DuplicateSignature();
     error SettlementDeadlinePassed();
+    error NonceAlreadyUsed();
 
     constructor(
         address _usdcToken,
@@ -154,8 +158,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
             feeAmount: feeAmount,
             grossAmount: grossAmount,
             createdAt: block.timestamp,
-            deadline: block.timestamp + DEFAULT_TIMEOUT,
-            nonce: 1,
+            fulfillmentDeadline: block.timestamp + DEFAULT_TIMEOUT,
             state: OrderState.FUNDED
         });
 
@@ -169,17 +172,23 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
      */
     function releaseWithOracle(
         bytes32 orderId,
+        string calldata carrierId,
         bytes32 trackingHash,
-        uint256 deadline,
+        uint256 nonce,
+        uint256 voucherDeadline,
         bytes[] calldata signatures
     ) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (signatures.length < THRESHOLD) revert InvalidQuorum();
 
-        // Settlement is only valid if oracle attestation deadline/signed time is before or equal to order deadline, and voucher hasn't expired.
-        if (block.timestamp > deadline) revert SignatureExpired();
-        if (deadline > order.deadline) revert SettlementDeadlinePassed();
+        // Enforce per-order nonce uniqueness
+        if (usedNonces[orderId][nonce]) revert NonceAlreadyUsed();
+
+        // Cryptographic voucher deadline check vs current block timestamp
+        if (block.timestamp > voucherDeadline) revert SignatureExpired();
+        // Fulfillment deadline check vs current block timestamp
+        if (block.timestamp > order.fulfillmentDeadline) revert SettlementDeadlinePassed();
 
         bytes32 structHash = keccak256(
             abi.encode(
@@ -189,9 +198,10 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
                 order.seller,
                 address(usdcToken),
                 order.itemPrice,
+                keccak256(bytes(carrierId)),
                 trackingHash,
-                order.nonce,
-                deadline
+                nonce,
+                voucherDeadline
             )
         );
 
@@ -203,12 +213,23 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         if (!isOracleSigner[signer0] || !isOracleSigner[signer1]) revert InvalidSignature();
         if (signer0 == signer1) revert DuplicateSignature();
 
-        order.nonce++;
+        usedNonces[orderId][nonce] = true;
         _executeSettlement(order);
     }
 
     /**
-     * @notice Direct release triggered exclusively by the buyer.
+     * @notice Direct voluntary confirmation and settlement triggered exclusively by the buyer.
+     */
+    function confirmReceiptByBuyer(bytes32 orderId) external whenNotPaused nonReentrant {
+        EscrowOrder storage order = orders[orderId];
+        if (order.state != OrderState.FUNDED) revert InvalidStatus();
+        if (msg.sender != order.buyer) revert Unauthorized();
+
+        _executeSettlement(order);
+    }
+
+    /**
+     * @notice Alias for confirmReceiptByBuyer for backwards compatibility.
      */
     function releaseByBuyer(bytes32 orderId) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
@@ -219,14 +240,14 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     }
 
     /**
-     * @notice Buyer-triggered refund after deadline expiry (claimRefund).
+     * @notice Buyer-triggered refund after fulfillment deadline expiry (claimRefund).
      * @dev Note: Not restricted by whenNotPaused so refunds remain permanently accessible even when paused.
      */
     function claimRefund(bytes32 orderId) external nonReentrant {
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
-        if (block.timestamp < order.deadline) revert TimeoutNotReached();
+        if (block.timestamp < order.fulfillmentDeadline) revert TimeoutNotReached();
 
         order.state = OrderState.REFUNDED;
         uint256 totalRefund = order.grossAmount;
@@ -242,7 +263,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
-        if (block.timestamp < order.deadline) revert TimeoutNotReached();
+        if (block.timestamp < order.fulfillmentDeadline) revert TimeoutNotReached();
 
         order.state = OrderState.REFUNDED;
         uint256 totalRefund = order.grossAmount;
@@ -266,3 +287,4 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         return _domainSeparatorV4();
     }
 }
+

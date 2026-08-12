@@ -44,8 +44,9 @@ async function main() {
   console.log("--- Test Case 2: Quorum Failure & Attacker Signature Rejection ---");
   const chainId = (await ethers.provider.getNetwork()).chainId;
   const block = await ethers.provider.getBlock("latest");
-  const deadline = block.timestamp + 3600;
-  const trackingHash = await escrow.computeTrackingHash("UPS", "TRACKING_UPS");
+  const voucherDeadline = block.timestamp + 3600;
+  const carrierId = "UPS";
+  const trackingHash = await escrow.computeTrackingHash(carrierId, "TRACKING_UPS");
 
   const domain = {
     name: "DecentralizedStripeEscrow",
@@ -61,9 +62,10 @@ async function main() {
       { name: "seller", type: "address" },
       { name: "token", type: "address" },
       { name: "amount", type: "uint256" },
+      { name: "carrierId", type: "string" },
       { name: "trackingHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
-      { name: "deadline", type: "uint256" }
+      { name: "voucherDeadline", type: "uint256" }
     ]
   };
 
@@ -73,9 +75,10 @@ async function main() {
     seller: seller.address,
     token: usdc.address,
     amount: itemPrice,
+    carrierId: carrierId,
     trackingHash: trackingHash,
     nonce: 1,
-    deadline: deadline
+    voucherDeadline: voucherDeadline
   };
 
   const sigAttacker = await attacker._signTypedData(domain, types, value);
@@ -83,14 +86,14 @@ async function main() {
   const sig2 = await oracle2._signTypedData(domain, types, value);
 
   try {
-    await escrow.releaseWithOracle(orderId1, trackingHash, deadline, [sig1, sigAttacker]);
+    await escrow.releaseWithOracle(orderId1, carrierId, trackingHash, 1, voucherDeadline, [sig1, sigAttacker]);
     console.error("FAIL: Attacker signature accepted!");
     process.exit(1);
   } catch (err) {
     console.log("PASS: Attacker signature correctly rejected.");
   }
 
-  await escrow.releaseWithOracle(orderId1, trackingHash, deadline, [sig1, sig2]);
+  await escrow.releaseWithOracle(orderId1, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
   console.log("PASS: Valid 2-of-3 quorum release successful.");
 
   // TEST 3: Buyer-Triggered Refund & Unauthorized Attempt
@@ -121,3 +124,4 @@ main().catch((error) => {
   console.error("Chaos test failed:", error);
   process.exit(1);
 });
+

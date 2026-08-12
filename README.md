@@ -1,26 +1,37 @@
 # Decentralized Stripe PoC
 
+> [!WARNING]
+> **DISCLAIMER**: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
+
 Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement on Ethereum Virtual Machine (EVM) compatible networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
 
 ---
 
 ## 📖 System Overview
 
-Decentralized Stripe enables Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
+Decentralized Stripe enables non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
 
 ```
-+------------------+         1. Deposit USDC + Surcharge      +-------------------------+
-|                  | ---------------------------------------> |                         |
-|   Buyer Wallet   |                                          | Escrow Smart Contract   |
-|                  | <--------------------------------------- |                         |
-+------------------+         4. Buyer-Triggered Refund        +-------------------------+
-         |                        (After Timeout)                        ^
-         |                                                               | 3. 2-of-3 EIP-712
-         | 2. Tracking Hash                                              |    Threshold Vouchers
-         v                                                               |
-+------------------+         Carrier API Check                +-------------------------+
-|   Backend API    | ---------------------------------------> | Multi-Oracle Threshold  |
-+------------------+                                          +-------------------------+
+                  Carrier APIs
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+       Oracle 1     Oracle 2     Oracle 3
+          │            │            │
+          └──────┬─────┴─────┬──────┘
+                 │   2 / 3   │
+                 ▼           │
+           EIP-712 Attestation
+                 │
+                 ▼
+          Escrow Contract ◄─── Voluntary Buyer Confirmation
+                 │
+          ┌──────┴──────┐
+          ▼             ▼
+       SETTLED       REFUNDED
+                         ▲
+                         │
+                  Buyer + fulfillmentDeadline
 ```
 
 ### Key Non-Custodial Invariants & Security Highlights
@@ -28,21 +39,21 @@ Decentralized Stripe enables Non-custodial, permissionless e-commerce escrow wit
   1. **Invariant 1**: A settled order can never be refunded.
   2. **Invariant 2**: A refunded order can never be settled.
   3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund`).
-  4. **Invariant 4**: Only authorized oracle quorum (2-of-3) can trigger settlement via release voucher attestation.
-  5. **Invariant 5**: A settlement voucher can only be used once (nonce invalidated).
+  4. **Invariant 4**: Settlement can occur via EITHER (2-of-3 Oracle Quorum threshold release) OR (Direct Voluntary Buyer Confirmation via `confirmReceiptByBuyer`).
+  5. **Invariant 5**: A settlement voucher nonce is scoped per order (`usedNonces[orderId][nonce]`) and can only be used once to prevent cross-order replay attacks.
   6. **Invariant 6**: A voucher cannot be replayed on another chain (`chainId` in EIP-712 domain).
   7. **Invariant 7**: A voucher cannot be replayed on another escrow contract (`verifyingContract` address in EIP-712 domain).
   8. **Invariant 8**: The seller can never withdraw funds before settlement.
   9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
   10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters.
 - **Circuit Breaker Pause Rules**:
-  - `createOrder`, `deposit`, `releaseWithOracle`, `releaseByBuyer` are paused during circuit breaker activation.
+  - `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer`, `releaseByBuyer` are paused during circuit breaker activation.
   - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds.
 - **Race Condition Resolution**: On-chain transaction ordering determines state. Whichever valid transaction (`SETTLED` or `REFUNDED`) hits the block first seals the terminal state.
-- **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `trackingHash`, `nonce`, `deadline`) to block cross-chain, cross-contract, and replay attacks.
+- **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.
 - **2-of-3 Threshold Oracle Quorum**: Multi-signature oracle attestation requirement verifying `signatures[0]` and `signatures[1]` from `authorizedOracles`, ensuring distinct signers (`signer0 != signer1`) and preventing single-point-of-failure oracle risk.
-- **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers.
-- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `CREATED` -> `FUNDED` -> (`SETTLED`) OR (`REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`).
+- **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers alongside explicit `carrierId`.
+- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `UNINITIALIZED` -> `FUNDED` -> (`SETTLED`) OR (`REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`).
 
 ---
 
@@ -181,3 +192,4 @@ npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "
 - **EIP-712 Typed Hashing**: Complete domain separation preventing cross-chain and replay exploits.
 - **SafeERC20 Protection**: Guarded against non-standard ERC-20 transfer behaviors.
 - **Re-entrancy Guard**: Non-reentrant modifiers on all state-changing entrypoints.
+
