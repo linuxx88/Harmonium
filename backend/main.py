@@ -18,6 +18,7 @@ app.add_middleware(
 
 checkout_sessions: Dict[str, dict] = {}
 tracked_orders: Dict[str, dict] = {}
+order_nonces: Dict[str, int] = {}
 
 # Load 3 oracle private keys for true 2-of-3 threshold quorum
 ORACLE_KEYS: List[str] = []
@@ -87,7 +88,8 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
         voucher_deadline = int(time.time()) + 3600
-        nonce = 1
+        current_nonce = order_nonces.get(order_id, 0) + 1
+        order_nonces[order_id] = current_nonce
         carrier_id = carrier_info.get("carrier", "UPS")
         tracking_id = order.get("tracking_id", "TRACK123")
         tracking_hash = compute_tracking_hash(carrier_id, tracking_id)
@@ -108,7 +110,7 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
                 item_price=order["item_price"],
                 carrier_id=carrier_id,
                 tracking_hash_hex=tracking_hash,
-                nonce=nonce,
+                nonce=current_nonce,
                 voucher_deadline=voucher_deadline,
                 oracle_private_key=oracle_pk
             )
@@ -116,7 +118,7 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
 
         order["signatures"] = signatures
         order["voucher_deadline"] = voucher_deadline
-        order["nonce"] = nonce
+        order["nonce"] = current_nonce
         order["status"] = "ready_for_release"
         return {
             "status": "success",
