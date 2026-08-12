@@ -9,27 +9,25 @@
 ## Security Model
 
 ```
-                  Carrier APIs
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       Oracle 1     Oracle 2     Oracle 3
-          │            │            │
-          └──────┬─────┴─────┬──────┘
-                 │   2 / 3   │
-                 ▼           │
-           EIP-712 Attestation
-                 │
-                 ▼
-          Escrow Contract ◄─── Voluntary Buyer Confirmation
-                 │
-          ┌──────┴──────┐
-          ▼             ▼
-       SETTLED       REFUNDED
-                         ▲
-                         │
-                  Buyer + fulfillmentDeadline
+UNINITIALIZED
+      │
+      │ createAndFundOrder()
+      ▼
+   FUNDED
+    │   │
+    │   └── claimRefund() (after deadline) ──> REFUNDED
+    │
+    ├── 2-of-3 oracle quorum ──────────────> SETTLED
+    │
+    └── buyer confirmation ────────────────> SETTLED
 ```
+
+### Formal Threat Model & Oracle Boundary Conditions
+> **Threat Model Statement**: The system does not eliminate oracle risk; it elevates the compromise threshold to N >= 2.
+>
+> **Boundary Conditions**:
+> - **1 compromised oracle**: Settlement remains cryptographically protected (Security assumption HOLDS).
+> - **2 compromised oracles**: Threshold broken, unauthorized settlement becomes possible (Security assumption FAILS).
 
 ### Trusted
 - EVM Consensus / Layer-2 Execution
@@ -76,6 +74,23 @@
   - `voucher.grossAmount == order.grossAmount`
   - `voucher.itemPrice == order.itemPrice`
   - `order.grossAmount == order.itemPrice + order.feeAmount`
+
+## 🔄 Oracle Key Rotation Governance & Security Boundaries
+
+To maintain strict compliance with **Invariant 9** (*No privileged account can arbitrarily release escrow funds*), oracle key rotation via `setOracleSigners(address[] calldata _newSigners)` adheres to the following rules:
+
+1. **Who can rotate an oracle?**
+   - Strictly restricted to contract `onlyOwner` (admin/multisig).
+2. **Can rotation occur while orders are `FUNDED`?**
+   - **Yes.** Active `FUNDED` orders are not locked to specific oracle key snapshots. They evaluate validity against `isOracleSigner[signer]` at the moment of settlement transaction execution.
+3. **Can the admin replace 2-of-3 compromised oracles?**
+   - **Yes.** In an emergency incident response scenario where 1 or 2 oracle private keys are compromised, the admin can invoke `setOracleSigners` to revoke the compromised addresses and register new secure oracle public keys.
+4. **Can oracle rotation invalidate existing vouchers?**
+   - **Yes.** Any outstanding EIP-712 vouchers signed by revoked oracle keys become instantly invalid (`isOracleSigner[signer] == false` causing `InvalidSignature` revert).
+5. **Non-Custodial Safeguard Guarantee (Invariant 9 Integrity)**:
+   - Admin rotation of oracle signers does **NOT** grant the admin custody or transfer rights over escrowed funds.
+   - To settle an order after rotation, the admin must control at least 2 valid, active oracle private keys *AND* generate a cryptographically valid EIP-712 `ReleaseVoucher` matching the exact on-chain order parameters.
+   - If the buyer does not receive delivery, the buyer retains their autonomous right to execute `claimRefund` once `fulfillmentDeadline` expires, regardless of any oracle key rotations performed by the admin.
 
 ## State Machine Strict Transition Rules
 - **Enum Specification**: `enum OrderState { UNINITIALIZED, FUNDED, SETTLED, REFUNDED }`

@@ -1,4 +1,11 @@
-const { ethers } = require("hardhat");
+/**
+ * === Formal Threat Model & Chaos Test Suite ===
+ * Statement: The system does not eliminate oracle risk; it elevates the compromise threshold to N >= 2.
+ * 
+ * Boundary Conditions:
+ * 1. 1 compromised oracle -> Settlement remains cryptographically protected (Security assumption HOLDS).
+ * 2. 2 compromised oracles -> Threshold broken, unauthorized settlement becomes possible (Security assumption FAILS).
+ */
 
 async function main() {
   console.log("=== Refactored Chaos & Security Test Suite Execution ===");
@@ -61,7 +68,8 @@ async function main() {
       { name: "buyer", type: "address" },
       { name: "seller", type: "address" },
       { name: "token", type: "address" },
-      { name: "amount", type: "uint256" },
+      { name: "grossAmount", type: "uint256" },
+      { name: "itemPrice", type: "uint256" },
       { name: "carrierId", type: "string" },
       { name: "trackingHash", type: "bytes32" },
       { name: "nonce", type: "uint256" },
@@ -74,7 +82,8 @@ async function main() {
     buyer: buyer.address,
     seller: seller.address,
     token: usdc.address,
-    amount: itemPrice,
+    grossAmount: grossAmount,
+    itemPrice: itemPrice,
     carrierId: carrierId,
     trackingHash: trackingHash,
     nonce: 1,
@@ -86,14 +95,14 @@ async function main() {
   const sig2 = await oracle2._signTypedData(domain, types, value);
 
   try {
-    await escrow.releaseWithOracle(orderId1, carrierId, trackingHash, 1, voucherDeadline, [sig1, sigAttacker]);
+    await escrow.releaseWithOracle(orderId1, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadline, [sig1, sigAttacker]);
     console.error("FAIL: Attacker signature accepted!");
     process.exit(1);
   } catch (err) {
     console.log("PASS: Attacker signature correctly rejected.");
   }
 
-  await escrow.releaseWithOracle(orderId1, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
+  await escrow.releaseWithOracle(orderId1, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
   console.log("PASS: Valid 2-of-3 quorum release successful.");
 
   // TEST 3: Buyer-Triggered Refund & Unauthorized Attempt

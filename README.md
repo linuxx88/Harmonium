@@ -12,26 +12,17 @@ Non-custodial, permissionless e-commerce escrow with cryptographically verified 
 Decentralized Stripe enables non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
 
 ```
-                  Carrier APIs
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-       Oracle 1     Oracle 2     Oracle 3
-          │            │            │
-          └──────┬─────┴─────┬──────┘
-                 │   2 / 3   │
-                 ▼           │
-           EIP-712 Attestation
-                 │
-                 ▼
-          Escrow Contract ◄─── Voluntary Buyer Confirmation
-                 │
-          ┌──────┴──────┐
-          ▼             ▼
-       SETTLED       REFUNDED
-                         ▲
-                         │
-                  Buyer + fulfillmentDeadline
+UNINITIALIZED
+      │
+      │ createAndFundOrder()
+      ▼
+   FUNDED
+    │   │
+    │   └── claimRefund() (after deadline) ──> REFUNDED
+    │
+    ├── 2-of-3 oracle quorum ──────────────> SETTLED
+    │
+    └── buyer confirmation ────────────────> SETTLED
 ```
 
 ### Key Non-Custodial Invariants & Security Highlights

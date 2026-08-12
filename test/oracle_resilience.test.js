@@ -1,3 +1,12 @@
+/**
+ * === Formal Threat Model & Oracle Resilience Test Suite ===
+ * Statement: The system does not eliminate oracle risk; it elevates the compromise threshold to N >= 2.
+ * 
+ * Boundary Conditions:
+ * 1. 1 compromised oracle -> Settlement remains cryptographically protected (Security assumption HOLDS).
+ * 2. 2 compromised oracles -> Threshold broken, unauthorized settlement becomes possible (Security assumption FAILS).
+ */
+
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 

@@ -238,11 +238,40 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       expect(order.state).to.equal(2); // OrderState.SETTLED
     });
 
-    it("Should revert non-buyer attempt for direct receipt confirmation", async function () {
+    it("Should revert confirmReceiptByBuyer when called by unauthorized roles (seller, oracle, owner/admin, attacker)", async function () {
+      // Seller attempt
       await expectRevertCustomError(
         escrow.connect(seller).confirmReceiptByBuyer(ORDER_ID),
         escrow,
         "Unauthorized"
+      );
+      // Oracle attempt
+      await expectRevertCustomError(
+        escrow.connect(oracle1).confirmReceiptByBuyer(ORDER_ID),
+        escrow,
+        "Unauthorized"
+      );
+      // Admin / Contract Owner attempt
+      await expectRevertCustomError(
+        escrow.connect(owner).confirmReceiptByBuyer(ORDER_ID),
+        escrow,
+        "Unauthorized"
+      );
+      // Attacker attempt
+      await expectRevertCustomError(
+        escrow.connect(attacker).confirmReceiptByBuyer(ORDER_ID),
+        escrow,
+        "Unauthorized"
+      );
+    });
+
+    it("Should revert confirmReceiptByBuyer when order state is not FUNDED", async function () {
+      const UNINIT_ORDER = ethers.utils.id("ORDER_UNINITIALIZED_TEST");
+      // Attempt on UNINITIALIZED order
+      await expectRevertCustomError(
+        escrow.connect(buyer).confirmReceiptByBuyer(UNINIT_ORDER),
+        escrow,
+        "InvalidStatus"
       );
     });
 
