@@ -15,10 +15,10 @@ async function main() {
   console.log(`MockUSDC deployed to: ${usdc.address}`);
 
   // Mint USDC to buyer
-  const netAmount = ethers.utils.parseUnits("100", 6);
-  const feeAmount = netAmount.mul(10).div(10000);
-  const totalDeposit = netAmount.add(feeAmount);
-  await usdc.mint(buyer.address, totalDeposit);
+  const itemPrice = ethers.utils.parseUnits("100", 6);
+  const feeAmount = itemPrice.mul(10).div(10000);
+  const grossAmount = itemPrice.add(feeAmount);
+  await usdc.mint(buyer.address, grossAmount);
 
   // 2. Deploy Escrow Contract with 2-of-3 threshold
   const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
@@ -28,16 +28,17 @@ async function main() {
 
   // 3. Buyer approves and deposits
   const orderId = ethers.utils.id("ORDER_SIM_999");
-  const trackingHash = ethers.utils.id("TRACKING_UPS_SIM");
-  await usdc.connect(buyer).approve(escrow.address, totalDeposit);
+  const trackingHash = await escrow.computeTrackingHash("UPS", "TRACK123");
+  await usdc.connect(buyer).approve(escrow.address, grossAmount);
 
-  const tx = await escrow.connect(buyer).deposit(orderId, seller.address, netAmount);
+  const tx = await escrow.connect(buyer).deposit(orderId, seller.address, itemPrice);
   await tx.wait();
   console.log(`Deposit successful for Order ID: ${orderId}`);
 
   // 4. Generate 2-of-3 EIP-712 signatures
   const chainId = (await ethers.provider.getNetwork()).chainId;
-  const deadline = Math.floor(Date.now() / 1000) + 3600;
+  const block = await ethers.provider.getBlock("latest");
+  const deadline = block.timestamp + 3600;
 
   const domain = {
     name: "DecentralizedStripeEscrow",
@@ -64,7 +65,7 @@ async function main() {
     buyer: buyer.address,
     seller: seller.address,
     token: usdc.address,
-    amount: netAmount,
+    amount: itemPrice,
     trackingHash: trackingHash,
     nonce: 1,
     deadline: deadline
@@ -82,7 +83,7 @@ async function main() {
   console.log(`Seller Balance: ${ethers.utils.formatUnits(sellerBalance, 6)} USDC`);
   console.log(`Fee Recipient Balance: ${ethers.utils.formatUnits(feeBalance, 6)} USDC`);
 
-  if (sellerBalance.eq(netAmount) && feeBalance.eq(feeAmount)) {
+  if (sellerBalance.eq(itemPrice) && feeBalance.eq(feeAmount)) {
     console.log("=== Refactored E2E Simulation SUCCESS ===");
   } else {
     console.error("Mismatch in balances!");

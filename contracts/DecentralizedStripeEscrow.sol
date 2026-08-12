@@ -11,25 +11,26 @@ import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 /**
  * @title DecentralizedStripeEscrow
- * @notice Permissionless USDC escrow infrastructure for e-commerce with verifiable delivery settlement.
- * @dev Hardened with EIP-712 structured signatures, 2-of-3 threshold oracle verification, buyer-paid fee surcharges, and anti-replay nonces.
+ * @notice Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement.
+ * @dev Hardened with EIP-712 structured vouchers, 2-of-3 threshold oracle verification, buyer-paid fee surcharges, and anti-replay nonces.
  */
 contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712 {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 
-    enum EscrowStatus { NonExistent, Deposited, Released, Refunded, Disputed }
+    enum OrderState { UNINITIALIZED, CREATED, FUNDED, SETTLED, REFUNDED }
 
     struct EscrowOrder {
         bytes32 orderId;
         address buyer;
         address seller;
-        uint256 netAmount;
+        uint256 itemPrice;
         uint256 feeAmount;
+        uint256 grossAmount;
         uint256 createdAt;
-        uint256 timeout;
+        uint256 deadline;
         uint256 nonce;
-        EscrowStatus status;
+        OrderState state;
     }
 
     bytes32 public constant RELEASE_VOUCHER_TYPEHASH = keccak256(
@@ -45,21 +46,20 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
 
     address[] public oracleSigners;
     mapping(address => bool) public isOracleSigner;
-    mapping(bytes32 => mapping(address => bool)) public oracleAttestations;
 
     mapping(bytes32 => EscrowOrder) public orders;
 
+    event OrderCreated(bytes32 indexed orderId, address indexed buyer, address indexed seller, uint256 itemPrice);
     event PaymentDeposited(
         bytes32 indexed orderId,
         address indexed buyer,
         address indexed seller,
-        uint256 netAmount,
+        uint256 itemPrice,
         uint256 feeAmount,
-        uint256 totalDeposited
+        uint256 grossAmount
     );
-    event PaymentReleased(bytes32 indexed orderId, address indexed seller, uint256 amountReleased, uint256 feeDeducted);
+    event PaymentSettled(bytes32 indexed orderId, address indexed seller, uint256 itemPrice, uint256 feeAmount);
     event BuyerRefunded(bytes32 indexed orderId, address indexed buyer, uint256 amountRefunded);
-    event DisputeRaised(bytes32 indexed orderId, address indexed raisedBy);
     event OracleSignersUpdated(address[] newSigners);
     event FeeRecipientUpdated(address indexed newFeeRecipient);
 
@@ -74,6 +74,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     error InvalidQuorum();
     error SignatureExpired();
     error DuplicateSignature();
+    error SettlementDeadlinePassed();
 
     constructor(
         address _usdcToken,
@@ -126,36 +127,45 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     }
 
     /**
+     * @notice Helper to compute order tracking hash from carrier string/ID and tracking number.
+     */
+    function computeTrackingHash(string calldata carrierId, string calldata trackingNumber) public pure returns (bytes32) {
+        return keccak256(abi.encode(carrierId, trackingNumber));
+    }
+
+    /**
      * @notice Buyer deposits payment + surcharge fee into escrow.
      * @param orderId Unique identifier for the order.
      * @param seller Recipient of net payment upon delivery.
-     * @param netAmount Exact amount seller will receive ($100.00 USDC).
+     * @param itemPrice Exact amount seller will receive ($100.00 USDC).
      */
-    function deposit(bytes32 orderId, address seller, uint256 netAmount) external whenNotPaused nonReentrant {
-        if (orders[orderId].status != EscrowStatus.NonExistent) revert OrderAlreadyExists();
-        if (seller == address(0) || netAmount == 0) revert InvalidAddress();
+    function deposit(bytes32 orderId, address seller, uint256 itemPrice) external whenNotPaused nonReentrant {
+        if (orders[orderId].state != OrderState.UNINITIALIZED) revert OrderAlreadyExists();
+        if (seller == address(0) || itemPrice == 0) revert InvalidAddress();
 
-        uint256 feeAmount = (netAmount * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
-        uint256 totalAmount = netAmount + feeAmount;
+        uint256 feeAmount = (itemPrice * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
+        uint256 grossAmount = itemPrice + feeAmount;
 
         orders[orderId] = EscrowOrder({
             orderId: orderId,
             buyer: msg.sender,
             seller: seller,
-            netAmount: netAmount,
+            itemPrice: itemPrice,
             feeAmount: feeAmount,
+            grossAmount: grossAmount,
             createdAt: block.timestamp,
-            timeout: block.timestamp + DEFAULT_TIMEOUT,
+            deadline: block.timestamp + DEFAULT_TIMEOUT,
             nonce: 1,
-            status: EscrowStatus.Deposited
+            state: OrderState.FUNDED
         });
 
-        usdcToken.safeTransferFrom(msg.sender, address(this), totalAmount);
-        emit PaymentDeposited(orderId, msg.sender, seller, netAmount, feeAmount, totalAmount);
+        usdcToken.safeTransferFrom(msg.sender, address(this), grossAmount);
+        emit PaymentDeposited(orderId, msg.sender, seller, itemPrice, feeAmount, grossAmount);
     }
 
     /**
      * @notice Releases escrow funds using 2-of-3 EIP-712 threshold signatures.
+     * @dev Validates signatures signature[0] and signature[1] with 2-of-3 Oracle Threshold rules.
      */
     function releaseWithOracle(
         bytes32 orderId,
@@ -164,9 +174,12 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         bytes[] calldata signatures
     ) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
-        if (order.status != EscrowStatus.Deposited) revert InvalidStatus();
-        if (block.timestamp > deadline) revert SignatureExpired();
+        if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (signatures.length < THRESHOLD) revert InvalidQuorum();
+
+        // Settlement is only valid if oracle attestation deadline/signed time is before or equal to order deadline, and voucher hasn't expired.
+        if (block.timestamp > deadline) revert SignatureExpired();
+        if (deadline > order.deadline) revert SettlementDeadlinePassed();
 
         bytes32 structHash = keccak256(
             abi.encode(
@@ -175,7 +188,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
                 order.buyer,
                 order.seller,
                 address(usdcToken),
-                order.netAmount,
+                order.itemPrice,
                 trackingHash,
                 order.nonce,
                 deadline
@@ -183,25 +196,15 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         );
 
         bytes32 digest = _hashTypedDataV4(structHash);
-        uint256 validSignatures = 0;
-        address[] memory seenSigners = new address[](signatures.length);
 
-        for (uint256 i = 0; i < signatures.length; i++) {
-            address recovered = ECDSA.recover(digest, signatures[i]);
-            if (!isOracleSigner[recovered]) revert InvalidSignature();
+        address signer0 = ECDSA.recover(digest, signatures[0]);
+        address signer1 = ECDSA.recover(digest, signatures[1]);
 
-            for (uint256 j = 0; j < validSignatures; j++) {
-                if (seenSigners[j] == recovered) revert DuplicateSignature();
-            }
-
-            seenSigners[validSignatures] = recovered;
-            validSignatures++;
-        }
-
-        if (validSignatures < THRESHOLD) revert InvalidQuorum();
+        if (!isOracleSigner[signer0] || !isOracleSigner[signer1]) revert InvalidSignature();
+        if (signer0 == signer1) revert DuplicateSignature();
 
         order.nonce++;
-        _executeRelease(order);
+        _executeSettlement(order);
     }
 
     /**
@@ -209,49 +212,53 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
      */
     function releaseByBuyer(bytes32 orderId) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
-        if (order.status != EscrowStatus.Deposited) revert InvalidStatus();
+        if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
 
-        _executeRelease(order);
+        _executeSettlement(order);
     }
 
     /**
-     * @notice Buyer-triggered refund after 7-day timeout expiry.
+     * @notice Buyer-triggered refund after deadline expiry (claimRefund).
      */
-    function refundTimeout(bytes32 orderId) external whenNotPaused nonReentrant {
+    function claimRefund(bytes32 orderId) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
-        if (order.status != EscrowStatus.Deposited) revert InvalidStatus();
+        if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
-        if (block.timestamp < order.timeout) revert TimeoutNotReached();
+        if (block.timestamp < order.deadline) revert TimeoutNotReached();
 
-        order.status = EscrowStatus.Refunded;
-        uint256 totalRefund = order.netAmount + order.feeAmount;
+        order.state = OrderState.REFUNDED;
+        uint256 totalRefund = order.grossAmount;
 
         usdcToken.safeTransfer(order.buyer, totalRefund);
         emit BuyerRefunded(orderId, order.buyer, totalRefund);
     }
 
     /**
-     * @notice Raises dispute lock on escrow order.
+     * @dev Backward compatibility alias for refundTimeout.
      */
-    function raiseDispute(bytes32 orderId) external whenNotPaused nonReentrant {
+    function refundTimeout(bytes32 orderId) external whenNotPaused nonReentrant {
         EscrowOrder storage order = orders[orderId];
-        if (order.status != EscrowStatus.Deposited) revert InvalidStatus();
-        if (msg.sender != order.buyer && msg.sender != order.seller) revert Unauthorized();
+        if (order.state != OrderState.FUNDED) revert InvalidStatus();
+        if (msg.sender != order.buyer) revert Unauthorized();
+        if (block.timestamp < order.deadline) revert TimeoutNotReached();
 
-        order.status = EscrowStatus.Disputed;
-        emit DisputeRaised(orderId, msg.sender);
+        order.state = OrderState.REFUNDED;
+        uint256 totalRefund = order.grossAmount;
+
+        usdcToken.safeTransfer(order.buyer, totalRefund);
+        emit BuyerRefunded(orderId, order.buyer, totalRefund);
     }
 
-    function _executeRelease(EscrowOrder storage order) internal {
-        order.status = EscrowStatus.Released;
+    function _executeSettlement(EscrowOrder storage order) internal {
+        order.state = OrderState.SETTLED;
 
         if (order.feeAmount > 0) {
             usdcToken.safeTransfer(feeRecipient, order.feeAmount);
         }
-        usdcToken.safeTransfer(order.seller, order.netAmount);
+        usdcToken.safeTransfer(order.seller, order.itemPrice);
 
-        emit PaymentReleased(order.orderId, order.seller, order.netAmount, order.feeAmount);
+        emit PaymentSettled(order.orderId, order.seller, order.itemPrice, order.feeAmount);
     }
 
     function getDomainSeparator() external view returns (bytes32) {

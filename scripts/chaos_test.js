@@ -16,12 +16,12 @@ async function main() {
   const escrow = await Escrow.deploy(usdc.address, [oracle1.address, oracle2.address, oracle3.address], feeRecipient.address);
   await escrow.deployed();
 
-  const netAmount = ethers.utils.parseUnits("500", 6);
-  const feeAmount = netAmount.mul(10).div(10000);
-  const totalDeposit = netAmount.add(feeAmount);
+  const itemPrice = ethers.utils.parseUnits("500", 6);
+  const feeAmount = itemPrice.mul(10).div(10000);
+  const grossAmount = itemPrice.add(feeAmount);
 
-  await usdc.mint(buyer.address, totalDeposit.mul(5));
-  await usdc.connect(buyer).approve(escrow.address, totalDeposit.mul(5));
+  await usdc.mint(buyer.address, grossAmount.mul(5));
+  await usdc.connect(buyer).approve(escrow.address, grossAmount.mul(5));
 
   // TEST 1: Pause Enforcement
   console.log("--- Test Case 1: Emergency Pause Enforcement ---");
@@ -29,7 +29,7 @@ async function main() {
   const orderId1 = ethers.utils.id("CHAOS_1");
 
   try {
-    await escrow.connect(buyer).deposit(orderId1, seller.address, netAmount);
+    await escrow.connect(buyer).deposit(orderId1, seller.address, itemPrice);
     console.error("FAIL: Deposit succeeded while paused!");
     process.exit(1);
   } catch (err) {
@@ -37,14 +37,15 @@ async function main() {
   }
 
   await escrow.connect(owner).unpause();
-  await escrow.connect(buyer).deposit(orderId1, seller.address, netAmount);
+  await escrow.connect(buyer).deposit(orderId1, seller.address, itemPrice);
   console.log("PASS: Deposit successful post-unpause.");
 
   // TEST 2: Single Attacker Signature Rejection (Threshold Failure)
   console.log("--- Test Case 2: Quorum Failure & Attacker Signature Rejection ---");
   const chainId = (await ethers.provider.getNetwork()).chainId;
-  const deadline = Math.floor(Date.now() / 1000) + 3600;
-  const trackingHash = ethers.utils.id("TRACKING_UPS");
+  const block = await ethers.provider.getBlock("latest");
+  const deadline = block.timestamp + 3600;
+  const trackingHash = await escrow.computeTrackingHash("UPS", "TRACKING_UPS");
 
   const domain = {
     name: "DecentralizedStripeEscrow",
@@ -71,7 +72,7 @@ async function main() {
     buyer: buyer.address,
     seller: seller.address,
     token: usdc.address,
-    amount: netAmount,
+    amount: itemPrice,
     trackingHash: trackingHash,
     nonce: 1,
     deadline: deadline
@@ -95,20 +96,20 @@ async function main() {
   // TEST 3: Buyer-Triggered Refund & Unauthorized Attempt
   console.log("--- Test Case 3: Buyer-Only Refund after Timeout ---");
   const orderId2 = ethers.utils.id("CHAOS_2");
-  await escrow.connect(buyer).deposit(orderId2, seller.address, netAmount);
+  await escrow.connect(buyer).deposit(orderId2, seller.address, itemPrice);
 
   await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
   await ethers.provider.send("evm_mine");
 
   try {
-    await escrow.connect(seller).refundTimeout(orderId2);
+    await escrow.connect(seller).claimRefund(orderId2);
     console.error("FAIL: Seller triggered refund!");
     process.exit(1);
   } catch (err) {
     console.log("PASS: Non-buyer refund attempt rejected.");
   }
 
-  await escrow.connect(buyer).refundTimeout(orderId2);
+  await escrow.connect(buyer).claimRefund(orderId2);
   console.log("PASS: Buyer successfully triggered timeout refund.");
 
   console.log("====================================================");
