@@ -289,7 +289,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       expect(order.state).to.equal(3); // OrderState.REFUNDED
     });
 
-    it("Should enforce irreversible terminal state (cannot refund after SETTLED)", async function () {
+    it("[INV-1: test_settled_order_cannot_be_refunded] Should enforce irreversible terminal state (cannot refund after SETTLED)", async function () {
       await escrow.connect(buyer).confirmReceiptByBuyer(ORDER_ID);
 
       await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
@@ -302,7 +302,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       );
     });
 
-    it("Should enforce irreversible terminal state (cannot SETTLE after REFUNDED)", async function () {
+    it("[INV-2: test_refunded_order_cannot_settle] Should enforce irreversible terminal state (cannot SETTLE after REFUNDED)", async function () {
       await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
       await ethers.provider.send("evm_mine");
 
@@ -315,7 +315,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       );
     });
 
-    it("Should block deposit when contract is paused but allow claimRefund when paused", async function () {
+    it("[INV-12: test_refund_accessible_when_paused] Should block deposit when contract is paused but allow claimRefund when paused", async function () {
       const NEW_ORDER_ID = ethers.utils.id("ORDER_PAUSE_TEST");
       await escrow.connect(owner).pause();
 

@@ -9,7 +9,7 @@ Non-custodial, permissionless e-commerce escrow with cryptographically verified 
 
 ## 🎯 Target Engineering Roles & Capability Mapping
 
-This repository is engineered as a production-grade benchmark demonstrating competency across 4 core Web3 engineering specializations:
+This repository is engineered as a security-focused engineering benchmark demonstrating competency across 4 core Web3 engineering specializations:
 
 1. **Solidity / Smart Contract Developer**: Hardened state machines, OpenZeppelin integration, `ReentrancyGuard`, `Pausable`, `SafeERC20`, and EIP-712 cryptographic verification (`DecentralizedStripeEscrow.sol`).
 2. **Web3 Payment Developer**: Non-custodial USDC payment flows, atomic buyer-paid fee surcharges, settlement/refund lifecycle management, and stablecoin escrow mechanics.
