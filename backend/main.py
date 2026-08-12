@@ -19,8 +19,11 @@ app.add_middleware(
 checkout_sessions: Dict[str, dict] = {}
 tracked_orders: Dict[str, dict] = {}
 
-ORACLE1_PRIVATE_KEY = os.getenv("ORACLE1_PRIVATE_KEY", "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
-ORACLE2_PRIVATE_KEY = os.getenv("ORACLE2_PRIVATE_KEY", "0x5de4111daf478a9cda47a93b007d115f54d70212354887921e0614609772251e")
+ORACLE1_PRIVATE_KEY = os.getenv("ORACLE1_PRIVATE_KEY")
+ORACLE2_PRIVATE_KEY = os.getenv("ORACLE2_PRIVATE_KEY")
+
+if not ORACLE1_PRIVATE_KEY or not ORACLE2_PRIVATE_KEY:
+    raise RuntimeError("Missing required ORACLE1_PRIVATE_KEY or ORACLE2_PRIVATE_KEY environment variables!")
 
 class CheckoutSessionRequest(BaseModel):
     order_id: str
