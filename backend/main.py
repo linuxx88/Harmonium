@@ -32,6 +32,7 @@ if len(ORACLE_KEYS) < 2:
 
 class CheckoutSessionRequest(BaseModel):
     order_id: str
+    buyer: str
     seller: str
     item_price: int
     gross_amount: int
@@ -58,6 +59,7 @@ def create_checkout_session(req: CheckoutSessionRequest):
     session_data = {
         "session_id": session_id,
         "order_id": req.order_id,
+        "buyer": req.buyer,
         "seller": req.seller,
         "item_price": req.item_price,
         "gross_amount": req.gross_amount,
@@ -83,7 +85,12 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
         raise HTTPException(status_code=404, detail="Order not found")
     
     order = tracked_orders[order_id]
-    order["buyer"] = req.buyer
+    
+    # Enforce strict buyer identity verification matching pre-bound checkout session buyer
+    if order.get("buyer") and req.buyer.lower() != order["buyer"].lower():
+        raise HTTPException(status_code=400, detail="Buyer address mismatch! Cannot generate attestation for unauthorized buyer identity.")
+    
+    order["buyer"] = order.get("buyer", req.buyer)
     
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
