@@ -55,16 +55,33 @@ def read_root():
 
 @app.post("/api/v1/checkout/session")
 def create_checkout_session(req: CheckoutSessionRequest):
+    # 1. Validate EVM address formats
+    for field_name, addr in [("buyer", req.buyer), ("seller", req.seller), ("token", req.token), ("contract_address", req.contract_address)]:
+        if not Web3.is_address(addr):
+            raise HTTPException(status_code=400, detail=f"Invalid EVM address format for {field_name}: {addr}")
+
+    # 2. Validate price and chain parameters
+    if req.item_price <= 0 or req.chain_id <= 0:
+        raise HTTPException(status_code=400, detail="item_price and chain_id must be positive integers!")
+
+    # 3. Validate Immutable Protocol Surcharge Fee Accounting (10 bps = 0.1%)
+    expected_fee = (req.item_price * 10) // 10000
+    if req.gross_amount != req.item_price + expected_fee:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid grossAmount fee surcharge! Expected grossAmount={req.item_price + expected_fee} (Item: {req.item_price}, Fee: {expected_fee}), got {req.gross_amount}."
+        )
+
     session_id = f"sess_{req.order_id}"
     session_data = {
         "session_id": session_id,
         "order_id": req.order_id,
-        "buyer": req.buyer,
-        "seller": req.seller,
+        "buyer": Web3.to_checksum_address(req.buyer),
+        "seller": Web3.to_checksum_address(req.seller),
         "item_price": req.item_price,
         "gross_amount": req.gross_amount,
-        "token": req.token,
-        "contract_address": req.contract_address,
+        "token": Web3.to_checksum_address(req.token),
+        "contract_address": Web3.to_checksum_address(req.contract_address),
         "chain_id": req.chain_id,
         "tracking_id": req.tracking_id,
         "status": "pending_deposit"
