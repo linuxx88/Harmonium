@@ -1,13 +1,12 @@
 import os
-import asyncio
-from typing import Dict, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+import time
+from typing import Dict, Optional, List
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from web3 import Web3
-from backend.oracle import verify_carrier_status, sign_escrow_release
+from backend.oracle import verify_carrier_status, sign_eip712_release_voucher
 
-app = FastAPI(title="Decentralized Stripe Oracle Backend", version="1.0.0")
+app = FastAPI(title="Decentralized Stripe EIP-712 Threshold Oracle Backend", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -17,27 +16,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage for checkout sessions and orders
 checkout_sessions: Dict[str, dict] = {}
 tracked_orders: Dict[str, dict] = {}
 
-ORACLE_PRIVATE_KEY = os.getenv("ORACLE_PRIVATE_KEY")
-if not ORACLE_PRIVATE_KEY:
-    raise RuntimeError("ORACLE_PRIVATE_KEY environment variable is missing!")
+ORACLE1_PRIVATE_KEY = os.getenv("ORACLE1_PRIVATE_KEY", "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+ORACLE2_PRIVATE_KEY = os.getenv("ORACLE2_PRIVATE_KEY", "0x5de4111daf478a9cda47a93b007d115f54d70212354887921e0614609772251e")
 
 class CheckoutSessionRequest(BaseModel):
     order_id: str
     seller: str
-    amount: int
+    item_price: int
+    gross_amount: int
+    token: str
+    contract_address: str
+    chain_id: int
     tracking_id: Optional[str] = "TRACK123"
 
-class WebhookCarrierUpdateRequest(BaseModel):
-    tracking_id: str
-    status: str
+class AttestationRequest(BaseModel):
+    buyer: str
 
 @app.get("/")
 def read_root():
-    return {"status": "online", "service": "Decentralized Stripe Oracle"}
+    return {"status": "online", "service": "Decentralized Stripe EIP-712 Threshold Oracle Service"}
 
 @app.post("/api/v1/checkout/session")
 def create_checkout_session(req: CheckoutSessionRequest):
@@ -46,7 +46,11 @@ def create_checkout_session(req: CheckoutSessionRequest):
         "session_id": session_id,
         "order_id": req.order_id,
         "seller": req.seller,
-        "amount": req.amount,
+        "item_price": req.item_price,
+        "gross_amount": req.gross_amount,
+        "token": req.token,
+        "contract_address": req.contract_address,
+        "chain_id": req.chain_id,
         "tracking_id": req.tracking_id,
         "status": "pending_deposit"
     }
@@ -60,28 +64,6 @@ def get_checkout_session(session_id: str):
         raise HTTPException(status_code=404, detail="Session not found")
     return checkout_sessions[session_id]
 
-@app.post("/api/v1/webhook/carrier-update")
-def carrier_update_webhook(req: WebhookCarrierUpdateRequest):
-    updated_orders = []
-    for order_id, order in tracked_orders.items():
-        if order.get("tracking_id") == req.tracking_id:
-            order["carrier_status"] = req.status
-            if req.status == "DELIVERED" and order.get("buyer"):
-                sig = sign_escrow_release(
-                    order_id_hex=order["order_id"],
-                    buyer=order["buyer"],
-                    seller=order["seller"],
-                    amount=order["amount"],
-                    oracle_private_key=ORACLE_PRIVATE_KEY
-                )
-                order["signature"] = sig
-                order["status"] = "ready_for_release"
-                updated_orders.append(order_id)
-    return {"status": "success", "updated_orders": updated_orders}
-
-class AttestationRequest(BaseModel):
-    buyer: str
-
 @app.post("/api/v1/order/{order_id}/attestation")
 def create_order_attestation(order_id: str, req: AttestationRequest):
     if order_id not in tracked_orders:
@@ -92,15 +74,47 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
     
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
-        sig = sign_escrow_release(
+        voucher_deadline = int(time.time()) + 3600
+        nonce = 1
+        carrier_id = carrier_info.get("carrier", "UPS")
+        tracking_hash = "0x" + "0" * 64 # Placeholder tracking hash for PoC API endpoint
+
+        sig1 = sign_eip712_release_voucher(
+            contract_address=order["contract_address"],
+            chain_id=order["chain_id"],
             order_id_hex=order["order_id"],
             buyer=req.buyer,
             seller=order["seller"],
-            amount=order["amount"],
-            oracle_private_key=ORACLE_PRIVATE_KEY
+            token=order["token"],
+            gross_amount=order["gross_amount"],
+            item_price=order["item_price"],
+            carrier_id=carrier_id,
+            tracking_hash_hex=tracking_hash,
+            nonce=nonce,
+            voucher_deadline=voucher_deadline,
+            oracle_private_key=ORACLE1_PRIVATE_KEY
         )
-        order["signature"] = sig
+
+        sig2 = sign_eip712_release_voucher(
+            contract_address=order["contract_address"],
+            chain_id=order["chain_id"],
+            order_id_hex=order["order_id"],
+            buyer=req.buyer,
+            seller=order["seller"],
+            token=order["token"],
+            gross_amount=order["gross_amount"],
+            item_price=order["item_price"],
+            carrier_id=carrier_id,
+            tracking_hash_hex=tracking_hash,
+            nonce=nonce,
+            voucher_deadline=voucher_deadline,
+            oracle_private_key=ORACLE2_PRIVATE_KEY
+        )
+
+        order["signatures"] = [sig1, sig2]
+        order["voucher_deadline"] = voucher_deadline
+        order["nonce"] = nonce
         order["status"] = "ready_for_release"
-        return {"status": "DELIVERED", "signature": sig, "order": order}
-    else:
-        return {"status": carrier_info.get("status"), "signature": None, "order": order}
+        return {"status": "success", "order": order}
+
+    return {"status": "pending_delivery", "carrier_info": carrier_info}
