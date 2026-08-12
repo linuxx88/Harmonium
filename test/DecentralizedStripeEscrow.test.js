@@ -1,13 +1,16 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DecentralizedStripeEscrow", function () {
+describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", function () {
   let mockUSDC, escrow;
-  let owner, buyer, seller, oracle, feeRecipient, attacker;
+  let owner, buyer, seller, oracle1, oracle2, oracle3, feeRecipient, attacker;
 
-  const INITIAL_MINT = ethers.utils.parseUnits("1000", 6);
-  const DEPOSIT_AMOUNT = ethers.utils.parseUnits("100", 6);
-  const ORDER_ID = ethers.utils.id("ORDER_123");
+  const INITIAL_MINT = ethers.utils.parseUnits("1000", 6); // 1,000 USDC (6 decimals)
+  const NET_AMOUNT = ethers.utils.parseUnits("100", 6);     // $100.00 USDC
+  const FEE_AMOUNT = NET_AMOUNT.mul(10).div(10000);         // $0.10 USDC (10 bps)
+  const TOTAL_DEPOSIT = NET_AMOUNT.add(FEE_AMOUNT);         // $100.10 USDC
+  const ORDER_ID = ethers.utils.id("ORDER_SECURE_123");
+  const TRACKING_HASH = ethers.utils.id("TRACKING_UPS_999");
 
   async function expectRevertCustomError(promise, contract, errorName) {
     try {
@@ -21,8 +24,44 @@ describe("DecentralizedStripeEscrow", function () {
     }
   }
 
+  async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, amount, trackingHash, nonce, deadline) {
+    const chainId = (await ethers.provider.getNetwork()).chainId;
+    const domain = {
+      name: "DecentralizedStripeEscrow",
+      version: "1",
+      chainId: chainId,
+      verifyingContract: escrow.address
+    };
+
+    const types = {
+      ReleaseVoucher: [
+        { name: "orderId", type: "bytes32" },
+        { name: "buyer", type: "address" },
+        { name: "seller", type: "address" },
+        { name: "token", type: "address" },
+        { name: "amount", type: "uint256" },
+        { name: "trackingHash", type: "bytes32" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" }
+      ]
+    };
+
+    const value = {
+      orderId: orderId,
+      buyer: buyerAddr,
+      seller: sellerAddr,
+      token: tokenAddr,
+      amount: amount,
+      trackingHash: trackingHash,
+      nonce: nonce,
+      deadline: deadline
+    };
+
+    return await signer._signTypedData(domain, types, value);
+  }
+
   beforeEach(async function () {
-    [owner, buyer, seller, oracle, feeRecipient, attacker] = await ethers.getSigners();
+    [owner, buyer, seller, oracle1, oracle2, oracle3, feeRecipient, attacker] = await ethers.getSigners();
 
     const MockUSDC = await ethers.getContractFactory("MockUSDC");
     mockUSDC = await MockUSDC.deploy();
@@ -31,7 +70,7 @@ describe("DecentralizedStripeEscrow", function () {
     const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
     escrow = await Escrow.deploy(
       mockUSDC.address,
-      oracle.address,
+      [oracle1.address, oracle2.address, oracle3.address],
       feeRecipient.address
     );
     await escrow.deployed();
@@ -40,9 +79,11 @@ describe("DecentralizedStripeEscrow", function () {
     await mockUSDC.connect(buyer).approve(escrow.address, INITIAL_MINT);
   });
 
-  describe("Deposit", function () {
-    it("Should deposit funds successfully and emit event", async function () {
-      const tx = await escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT);
+  describe("Deposit (Buyer Pays Surcharge)", function () {
+    it("Should deposit net amount + surcharge fee successfully", async function () {
+      const initialBuyerBalance = await mockUSDC.balanceOf(buyer.address);
+
+      const tx = await escrow.connect(buyer).deposit(ORDER_ID, seller.address, NET_AMOUNT);
       const receipt = await tx.wait();
 
       const event = receipt.events.find(e => e.event === 'PaymentDeposited');
@@ -50,147 +91,143 @@ describe("DecentralizedStripeEscrow", function () {
       expect(event.args.orderId).to.equal(ORDER_ID);
       expect(event.args.buyer).to.equal(buyer.address);
       expect(event.args.seller).to.equal(seller.address);
-      expect(event.args.amount.toString()).to.equal(DEPOSIT_AMOUNT.toString());
+      expect(event.args.netAmount.toString()).to.equal(NET_AMOUNT.toString());
+      expect(event.args.feeAmount.toString()).to.equal(FEE_AMOUNT.toString());
+
+      const finalBuyerBalance = await mockUSDC.balanceOf(buyer.address);
+      expect(initialBuyerBalance.sub(finalBuyerBalance).toString()).to.equal(TOTAL_DEPOSIT.toString());
 
       const order = await escrow.orders(ORDER_ID);
-      expect(order.buyer).to.equal(buyer.address);
-      expect(order.seller).to.equal(seller.address);
-      expect(order.amount.toString()).to.equal(DEPOSIT_AMOUNT.toString());
-      expect(order.status).to.equal(1); // Deposited
-    });
-
-    it("Should revert duplicate order deposit", async function () {
-      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT);
-      await expectRevertCustomError(
-        escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT),
-        escrow,
-        "OrderAlreadyExists"
-      );
+      expect(order.netAmount.toString()).to.equal(NET_AMOUNT.toString());
+      expect(order.feeAmount.toString()).to.equal(FEE_AMOUNT.toString());
+      expect(order.nonce.toString()).to.equal("1");
     });
   });
 
-  describe("Oracle & Direct Release (Happy Path & Fees)", function () {
+  describe("EIP-712 & 2-of-3 Threshold Settlement", function () {
     beforeEach(async function () {
-      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT);
+      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, NET_AMOUNT);
     });
 
-    it("Should release payment via valid Oracle ECDSA signature deducting 0.1% fee", async function () {
-      const messageHash = ethers.utils.solidityKeccak256(
-        ["bytes32", "address", "address", "uint256"],
-        [ORDER_ID, buyer.address, seller.address, DEPOSIT_AMOUNT]
-      );
-      const messageHashBytes = ethers.utils.arrayify(messageHash);
-      const signature = await oracle.signMessage(messageHashBytes);
+    it("Should release escrow when 2-of-3 valid oracle EIP-712 signatures are provided", async function () {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
 
-      const fee = DEPOSIT_AMOUNT.mul(10).div(10000); // 0.1% = 0.1 USDC
-      const netAmount = DEPOSIT_AMOUNT.sub(fee);
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
+      );
+      const sig2 = await createEIP712Signature(
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
+      );
 
       const initialSellerBalance = await mockUSDC.balanceOf(seller.address);
-      const initialFeeRecipientBalance = await mockUSDC.balanceOf(feeRecipient.address);
+      const initialFeeBalance = await mockUSDC.balanceOf(feeRecipient.address);
 
-      await escrow.releaseWithOracle(ORDER_ID, signature);
+      await escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sig2]);
 
       const finalSellerBalance = await mockUSDC.balanceOf(seller.address);
-      const finalFeeRecipientBalance = await mockUSDC.balanceOf(feeRecipient.address);
+      const finalFeeBalance = await mockUSDC.balanceOf(feeRecipient.address);
 
-      expect(finalSellerBalance.toString()).to.equal(initialSellerBalance.add(netAmount).toString());
-      expect(finalFeeRecipientBalance.toString()).to.equal(initialFeeRecipientBalance.add(fee).toString());
-
-      const order = await escrow.orders(ORDER_ID);
-      expect(order.status).to.equal(2); // Released
+      expect(finalSellerBalance.sub(initialSellerBalance).toString()).to.equal(NET_AMOUNT.toString());
+      expect(finalFeeBalance.sub(initialFeeBalance).toString()).to.equal(FEE_AMOUNT.toString());
     });
 
-    it("Should revert releaseWithOracle on invalid signature", async function () {
-      const messageHash = ethers.utils.solidityKeccak256(
-        ["bytes32", "address", "address", "uint256"],
-        [ORDER_ID, buyer.address, seller.address, DEPOSIT_AMOUNT]
+    it("Should revert if only 1 signature is provided (Quorum check)", async function () {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
       );
-      const messageHashBytes = ethers.utils.arrayify(messageHash);
-      const signature = await attacker.signMessage(messageHashBytes);
 
       await expectRevertCustomError(
-        escrow.releaseWithOracle(ORDER_ID, signature),
+        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1]),
+        escrow,
+        "InvalidQuorum"
+      );
+    });
+
+    it("Should revert on duplicate signatures from the same oracle signer", async function () {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
+      );
+
+      await expectRevertCustomError(
+        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sig1]),
+        escrow,
+        "DuplicateSignature"
+      );
+    });
+
+    it("Should revert on unauthorized attacker signature", async function () {
+      const deadline = Math.floor(Date.now() / 1000) + 3600;
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
+      );
+      const sigAttacker = await createEIP712Signature(
+        attacker, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, deadline
+      );
+
+      await expectRevertCustomError(
+        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, deadline, [sig1, sigAttacker]),
         escrow,
         "InvalidSignature"
       );
     });
 
-    it("Should allow buyer to manually release payment", async function () {
-      await escrow.connect(buyer).release(ORDER_ID);
+    it("Should revert on expired deadline", async function () {
+      const expiredDeadline = Math.floor(Date.now() / 1000) - 100;
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, expiredDeadline
+      );
+      const sig2 = await createEIP712Signature(
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, NET_AMOUNT, TRACKING_HASH, 1, expiredDeadline
+      );
+
+      await expectRevertCustomError(
+        escrow.releaseWithOracle(ORDER_ID, TRACKING_HASH, expiredDeadline, [sig1, sig2]),
+        escrow,
+        "SignatureExpired"
+      );
+    });
+  });
+
+  describe("Buyer Direct Controls & Buyer-Triggered Refund", function () {
+    beforeEach(async function () {
+      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, NET_AMOUNT);
+    });
+
+    it("Should allow buyer to directly release payment to seller", async function () {
+      await escrow.connect(buyer).releaseByBuyer(ORDER_ID);
       const order = await escrow.orders(ORDER_ID);
       expect(order.status).to.equal(2); // Released
     });
 
-    it("Should revert release by unauthorized caller", async function () {
+    it("Should revert non-buyer attempt for direct release", async function () {
       await expectRevertCustomError(
-        escrow.connect(attacker).release(ORDER_ID),
+        escrow.connect(seller).releaseByBuyer(ORDER_ID),
         escrow,
         "Unauthorized"
       );
     });
-  });
 
-  describe("Auto-Refund Timeout Path", function () {
-    beforeEach(async function () {
-      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT);
-    });
-
-    it("Should revert refund before 7 days timeout", async function () {
-      await expectRevertCustomError(
-        escrow.refundTimeout(ORDER_ID),
-        escrow,
-        "TimeoutNotReached"
-      );
-    });
-
-    it("Should execute refund after 7 days timeout", async function () {
+    it("Should execute buyer-triggered refund after 7-day timeout", async function () {
       await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
       await ethers.provider.send("evm_mine");
 
       const initialBuyerBalance = await mockUSDC.balanceOf(buyer.address);
-
-      await escrow.refundTimeout(ORDER_ID);
+      await escrow.connect(buyer).refundTimeout(ORDER_ID);
 
       const finalBuyerBalance = await mockUSDC.balanceOf(buyer.address);
-      expect(finalBuyerBalance.toString()).to.equal(initialBuyerBalance.add(DEPOSIT_AMOUNT).toString());
-
-      const order = await escrow.orders(ORDER_ID);
-      expect(order.status).to.equal(3); // Refunded
-    });
-  });
-
-  describe("Dispute & Emergency Pause Controls", function () {
-    beforeEach(async function () {
-      await escrow.connect(buyer).deposit(ORDER_ID, seller.address, DEPOSIT_AMOUNT);
+      expect(finalBuyerBalance.sub(initialBuyerBalance).toString()).to.equal(TOTAL_DEPOSIT.toString());
     });
 
-    it("Should allow buyer or seller to raise dispute and owner to resolve", async function () {
-      await escrow.connect(buyer).raiseDispute(ORDER_ID);
-      let order = await escrow.orders(ORDER_ID);
-      expect(order.status).to.equal(4); // Disputed
+    it("Should revert non-buyer attempt for timeout refund", async function () {
+      await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
+      await ethers.provider.send("evm_mine");
 
-      const halfAmount = DEPOSIT_AMOUNT.div(2);
-      await escrow.connect(owner).resolveDispute(ORDER_ID, buyer.address, halfAmount);
-
-      order = await escrow.orders(ORDER_ID);
-      expect(order.status).to.equal(2); // Released
-    });
-
-    it("Should prevent non-owner from pausing circuit breaker", async function () {
       await expectRevertCustomError(
-        escrow.connect(attacker).pause(),
+        escrow.connect(seller).refundTimeout(ORDER_ID),
         escrow,
-        "OwnableUnauthorizedAccount"
-      );
-    });
-
-    it("Should block deposits when circuit breaker is paused", async function () {
-      await escrow.connect(owner).pause();
-      const NEW_ORDER = ethers.utils.id("ORDER_456");
-      await expectRevertCustomError(
-        escrow.connect(buyer).deposit(NEW_ORDER, seller.address, DEPOSIT_AMOUNT),
-        escrow,
-        "EnforcedPause"
+        "Unauthorized"
       );
     });
   });

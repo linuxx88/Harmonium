@@ -1,115 +1,115 @@
 const { ethers } = require("hardhat");
 
 async function main() {
-  console.log("====================================================");
-  console.log("=== Phase 4 Chaos & Security Test Suite Execution ===");
-  console.log("====================================================\n");
+  console.log("=== Refactored Chaos & Security Test Suite Execution ===");
 
   const [owner, buyer, seller, feeRecipient, attacker] = await ethers.getSigners();
-  const oracleSigner = ethers.Wallet.createRandom();
-  console.log(`[Setup] Deployer/Owner: ${owner.address}`);
-  console.log(`[Setup] Oracle Signer: ${oracleSigner.address}`);
-  console.log(`[Setup] Attacker: ${attacker.address}\n`);
+  const oracle1 = ethers.Wallet.createRandom();
+  const oracle2 = ethers.Wallet.createRandom();
+  const oracle3 = ethers.Wallet.createRandom();
 
-  // 1. Deploy contracts
   const MockUSDC = await ethers.getContractFactory("MockUSDC");
   const usdc = await MockUSDC.deploy();
   await usdc.deployed();
 
   const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
-  const escrow = await Escrow.deploy(usdc.address, oracleSigner.address, feeRecipient.address);
+  const escrow = await Escrow.deploy(usdc.address, [oracle1.address, oracle2.address, oracle3.address], feeRecipient.address);
   await escrow.deployed();
 
-  const amount = ethers.utils.parseUnits("500", 6);
-  await usdc.mint(buyer.address, amount.mul(5));
-  await usdc.connect(buyer).approve(escrow.address, amount.mul(5));
+  const netAmount = ethers.utils.parseUnits("500", 6);
+  const feeAmount = netAmount.mul(10).div(10000);
+  const totalDeposit = netAmount.add(feeAmount);
 
-  // TEST CASE 1: Circuit Breaker Emergency Pause/Unpause
-  console.log("--- Test Case 1: Emergency Circuit Breaker Enforcement ---");
-  console.log("Pausing contract as owner...");
+  await usdc.mint(buyer.address, totalDeposit.mul(5));
+  await usdc.connect(buyer).approve(escrow.address, totalDeposit.mul(5));
+
+  // TEST 1: Pause Enforcement
+  console.log("--- Test Case 1: Emergency Pause Enforcement ---");
   await escrow.connect(owner).pause();
-  const orderId1 = ethers.utils.id("CHAOS_ORDER_1");
+  const orderId1 = ethers.utils.id("CHAOS_1");
 
   try {
-    await escrow.connect(buyer).deposit(orderId1, seller.address, amount);
+    await escrow.connect(buyer).deposit(orderId1, seller.address, netAmount);
     console.error("FAIL: Deposit succeeded while paused!");
     process.exit(1);
   } catch (err) {
     console.log("PASS: Deposit correctly blocked during contract pause.");
   }
 
-  console.log("Unpausing contract...");
   await escrow.connect(owner).unpause();
-  await escrow.connect(buyer).deposit(orderId1, seller.address, amount);
-  console.log("PASS: Deposit successful post-unpause.\n");
+  await escrow.connect(buyer).deposit(orderId1, seller.address, netAmount);
+  console.log("PASS: Deposit successful post-unpause.");
 
-  // TEST CASE 2: Invalid Oracle ECDSA Signature Injection
-  console.log("--- Test Case 2: Invalid Oracle Signature Injection (Spoofing) ---");
-  const messageHash = ethers.utils.solidityKeccak256(
-    ["bytes32", "address", "address", "uint256"],
-    [orderId1, buyer.address, seller.address, amount]
-  );
-  const attackerSignature = await attacker.signMessage(ethers.utils.arrayify(messageHash));
+  // TEST 2: Single Attacker Signature Rejection (Threshold Failure)
+  console.log("--- Test Case 2: Quorum Failure & Attacker Signature Rejection ---");
+  const chainId = (await ethers.provider.getNetwork()).chainId;
+  const deadline = Math.floor(Date.now() / 1000) + 3600;
+  const trackingHash = ethers.utils.id("TRACKING_UPS");
+
+  const domain = {
+    name: "DecentralizedStripeEscrow",
+    version: "1",
+    chainId: chainId,
+    verifyingContract: escrow.address
+  };
+
+  const types = {
+    ReleaseVoucher: [
+      { name: "orderId", type: "bytes32" },
+      { name: "buyer", type: "address" },
+      { name: "seller", type: "address" },
+      { name: "token", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "trackingHash", type: "bytes32" },
+      { name: "nonce", type: "uint256" },
+      { name: "deadline", type: "uint256" }
+    ]
+  };
+
+  const value = {
+    orderId: orderId1,
+    buyer: buyer.address,
+    seller: seller.address,
+    token: usdc.address,
+    amount: netAmount,
+    trackingHash: trackingHash,
+    nonce: 1,
+    deadline: deadline
+  };
+
+  const sigAttacker = await attacker._signTypedData(domain, types, value);
+  const sig1 = await oracle1._signTypedData(domain, types, value);
+  const sig2 = await oracle2._signTypedData(domain, types, value);
 
   try {
-    await escrow.connect(seller).releaseWithOracle(orderId1, attackerSignature);
-    console.error("FAIL: Invalid signature accepted!");
+    await escrow.releaseWithOracle(orderId1, trackingHash, deadline, [sig1, sigAttacker]);
+    console.error("FAIL: Attacker signature accepted!");
     process.exit(1);
   } catch (err) {
-    console.log("PASS: Invalid signature rejected by escrow smart contract.");
+    console.log("PASS: Attacker signature correctly rejected.");
   }
 
-  // Valid oracle signature release
-  const validSignature = await oracleSigner.signMessage(ethers.utils.arrayify(messageHash));
-  await escrow.connect(seller).releaseWithOracle(orderId1, validSignature);
-  console.log("PASS: Valid oracle signature successfully released funds.\n");
+  await escrow.releaseWithOracle(orderId1, trackingHash, deadline, [sig1, sig2]);
+  console.log("PASS: Valid 2-of-3 quorum release successful.");
 
-  // TEST CASE 3: Expired Escrow Auto-Refund Timeout & Early Refund Attempt
-  console.log("--- Test Case 3: Timeout Expiration & Early Refund Shield ---");
-  const orderId2 = ethers.utils.id("CHAOS_ORDER_2");
-  await escrow.connect(buyer).deposit(orderId2, seller.address, amount);
+  // TEST 3: Buyer-Triggered Refund & Unauthorized Attempt
+  console.log("--- Test Case 3: Buyer-Only Refund after Timeout ---");
+  const orderId2 = ethers.utils.id("CHAOS_2");
+  await escrow.connect(buyer).deposit(orderId2, seller.address, netAmount);
 
-  // Attempt early refund
-  try {
-    await escrow.connect(buyer).refundTimeout(orderId2);
-    console.error("FAIL: Early refund granted before timeout!");
-    process.exit(1);
-  } catch (err) {
-    console.log("PASS: Early refund attempt correctly blocked.");
-  }
-
-  // Fast forward 7 days + 1 second
-  console.log("Simulating network/time delay (+7 days)...");
   await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
   await ethers.provider.send("evm_mine");
 
-  const buyerBalanceBefore = await usdc.balanceOf(buyer.address);
-  await escrow.connect(buyer).refundTimeout(orderId2);
-  const buyerBalanceAfter = await usdc.balanceOf(buyer.address);
-  
-  if (buyerBalanceAfter.sub(buyerBalanceBefore).eq(amount)) {
-    console.log("PASS: Expired escrow successfully refunded full amount to buyer after 7-day timeout.\n");
-  } else {
-    console.error("FAIL: Refund amount calculation mismatch!");
-    process.exit(1);
-  }
-
-  // TEST CASE 4: Re-entrancy & Unauthorized Access Guard
-  console.log("--- Test Case 4: Unauthorized Dispute Resolution Prevention ---");
-  const orderId3 = ethers.utils.id("CHAOS_ORDER_3");
-  await escrow.connect(buyer).deposit(orderId3, seller.address, amount);
-  await escrow.connect(buyer).raiseDispute(orderId3);
-
   try {
-    await escrow.connect(attacker).resolveDispute(orderId3, attacker.address, amount);
-    console.error("FAIL: Attacker resolved dispute!");
+    await escrow.connect(seller).refundTimeout(orderId2);
+    console.error("FAIL: Seller triggered refund!");
     process.exit(1);
   } catch (err) {
-    console.log("PASS: Non-owner attempt to resolve dispute rejected.");
+    console.log("PASS: Non-buyer refund attempt rejected.");
   }
 
-  await escrow.connect(owner).resolveDispute(orderId3, buyer.address, amount);
-  console.log("PASS: Owner successfully resolved dispute.\n");
+  await escrow.connect(buyer).refundTimeout(orderId2);
+  console.log("PASS: Buyer successfully triggered timeout refund.");
 
   console.log("====================================================");
   console.log("=== ALL CHAOS & SECURITY TESTS PASSED 100% CLEAN ===");

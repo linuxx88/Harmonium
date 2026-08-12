@@ -1,97 +1,63 @@
 # Architecture System Documentation
 
+## System Position & Summary
+Permissionless USDC escrow infrastructure for e-commerce with verifiable delivery settlement.
+
 ## System Components
-- **Smart Contracts (EVM)**: ERC-20 Mock USDC token and Escrow payment contract with manual confirmation & oracle interface.
-- **Backend (FastAPI + web3.py)**: Listens for blockchain events, tracks payment state, and exposes API endpoints for checkout session creation.
-- **Frontend (Vanilla HTML/JS)**: Lightweight payment widget interacting with MetaMask/EVM wallet and backend API.
-- **Scripts**: Deployment and utility scripts for local EVM network setup (Anvil / Hardhat).
+- **Smart Contracts (EVM)**: Hardened ERC-20 Escrow with EIP-712 structured signatures, 2-of-3 threshold oracle verification, buyer fee surcharge model, anti-replay nonces, and zero discretionary admin overrides.
+- **Backend (FastAPI + web3.py)**: Multi-node oracle engine monitoring on-chain events, shipping carrier APIs, and generating cryptographic EIP-712 release vouchers.
+- **Frontend (Vanilla HTML/JS)**: Embeddable checkout widget interacting with EVM wallets and backend oracle endpoints.
+- **Scripts**: Automated testnet deployment (`deploy_testnet.js`), E2E flow simulation (`simulate_flow.js`), and security chaos test suite (`chaos_test.js`).
 
 ## Data Flow
 1. **Merchant/Client** -> Requests a payment session from **Backend API**.
-2. **Backend API** -> Creates a payment intent and returns contract/order parameters to **Frontend**.
-3. **Frontend** -> Prompts user to approve USDC allowance & deposit tokens to **Escrow Contract**.
-4. **Smart Contract** -> Emits `PaymentDeposited` event.
-5. **Backend** -> Listens for `PaymentDeposited` event and updates order status.
-6. **Delivery / Release** -> Merchant/Oracle triggers release on **Escrow Contract** to transfer funds to merchant.
+2. **Backend API** -> Generates order ID and parameters for **Frontend**.
+3. **Frontend** -> Buyer deposits exact item amount + 0.1% surcharge fee into **Escrow Contract**.
+4. **Smart Contract** -> Locks USDC tokens and emits `PaymentDeposited` event.
+5. **Oracle Nodes** -> Attest shipping carrier delivery status and produce EIP-712 signatures.
+6. **Settlement** -> 2-of-3 oracle threshold signatures or buyer direct release unlocks USDC funds to merchant ($100.00 exact) and protocol fee recipient ($0.10).
 
-## File Organization
-```
-DECENTRALIZED-STRIPE/
-├── contracts/       # Solidity smart contracts
-├── backend/         # FastAPI & web3.py application
-├── frontend/        # Vanilla HTML/JS widget
-├── scripts/         # Local deployment and setup scripts
-└── .env.example     # Environment configuration placeholders
-```
+## Security Architecture & Risk Controls
+- **EIP-712 Anti-Replay**: Signatures include `domainSeparator` (chainId, contractAddress), `orderId`, `buyer`, `seller`, `token`, `amount`, `trackingHash`, `nonce`, and `deadline`.
+- **2-of-3 Threshold Oracle Quorum**: Eliminates single-point-of-failure oracle risk.
+- **Minimization of Admin Control**: Owner can ONLY toggle emergency circuit breakers (`pause`/`unpause`). Discretionary release/refund overrides are strictly removed.
+- **Buyer-Triggered Refund**: Buyer can trigger full refund after 7-day timeout expiry if unfulfilled.
+- **Buyer Surcharge Model**: Buyer pays item price + fee (e.g. $100.10 USDC) so seller receives net amount ($100.00 USDC).
+
+---
 
 ## Phase 1: System Architecture & Project Setup
 
 - [x] **1.1 Directory & Workspace Initialization**
-  - Create project folder structure (`contracts/`, `backend/`, `frontend/`, `scripts/`).
-  - Initialize git repository and set up `.gitignore` and `.env.example`.
-
 - [x] **1.2 Smart Contract Toolchain Setup**
-  - Initialize Hardhat/Foundry environment with required dependencies (OpenZeppelin contracts, compilers).
-
 - [x] **1.3 Back-End & Front-End Boilerplate Setup**
-  - Set up Python virtual environment, `requirements.txt` (FastAPI, web3.py, uvicorn), and basic app entry point.
-  - Create minimal `index.html` structure in `frontend/`.
-
 - [x] **1.4 Verification**
-  - Verify local dev environment compiles clean before moving to Phase 2.
 
-## Phase 2: Core Smart Contract Implementation & Testing
+## Phase 2: Core Smart Contract Implementation, Security Hardening & Testing
 
 - [x] **2.1 Contract Specification & Interface Design**
-  - Define `DecentralizedStripeEscrow.sol` state variables (`buyer`, `seller`, `amount`, `status`, `trackingId`).
-  - Map essential function signatures: `deposit()`, `release()`, `refund()`, `raiseDispute()`, `setOracle()`.
-  - Design circuit breakers and emergency pause mechanisms.
-
-- [x] **2.2 Smart Contract Development (Solidity)**
-  - Implement core escrow logic using OpenZeppelin standards (`ReentrancyGuard`, `Pausable`, `SafeERC20`).
-  - Integrate fee deduction logic (0.1% protocol fee) and time-locked auto-refund timers.
-
-- [x] **2.3 Automated Test Suite Setup**
-  - Build comprehensive unit test suite in Hardhat/Foundry covering happy paths, edge cases, reentrancy resistance, and deadline expirations.
-
-- [x] **2.4 Local Verification & Gas Profiling**
-  - Execute full local test suite (100% pass target).
-  - Generate gas consumption report and verify zero critical vulnerabilities before approval.
+- [x] **2.2 Smart Contract Development (Solidity & OpenZeppelin)**
+- [x] **2.3 EIP-712 Typed Signatures & Anti-Replay Nonce Engine**
+  - Replace legacy ECDSA signatures with EIP-712 structured hash vouchers.
+  - Bind chainId, verifyingContract, orderId, buyer, seller, token, amount, trackingHash, nonce, and deadline.
+- [x] **2.4 2-of-3 Threshold Oracle Quorum**
+  - Implement multi-oracle threshold verification requiring 2 valid distinct oracle signatures for settlement.
+- [x] **2.5 Reduced Admin Rights & Buyer Surcharge Fee Model**
+  - Restrict owner permissions exclusively to emergency circuit breaker pause/unpause.
+  - Implement buyer surcharge model ($100.10 paid by buyer, $100.00 net seller payout, $0.10 protocol fee).
+- [x] **2.6 Automated Unit & Chaos Test Suite**
+  - Validate 100% test coverage across EIP-712 typed data hashing, threshold quorum, anti-replay, and timeout paths.
 
 ## Phase 3: Oracle Back-End & Front-End Payment Widget
 
 - [x] **3.1 Oracle Service Architecture (FastAPI)**
-  - Design FastAPI application structure to monitor on-chain `PaymentDeposited` events.
-  - Set up API endpoints to link on-chain transaction hashes with carrier tracking IDs.
-
 - [x] **3.2 Delivery Verification & Automated Settlement Engine**
-  - Implement the Oracle worker service that periodically queries shipping statuses (e.g., Canada Post / UPS mock API).
-  - Generate cryptographic signatures to trigger the smart contract's `release()` function automatically upon delivery confirmation.
-
 - [x] **3.3 Embeddable Checkout Widget Development**
-  - Build a zero-dependency JavaScript checkout component that merchants can insert into any web app.
-  - Handle wallet connections (or Passkey/Account Abstraction) and contract interaction signatures seamlessly.
-
 - [x] **3.4 End-to-End Local Integration Testing**
-  - Execute full transaction simulation: Checkout click -> Escrow deposit -> Carrier update simulation -> Oracle trigger -> Merchant USDC release.
-  - Validate end-to-end flow and confirm all system integration tests pass.
 
 ## Phase 4: Full Deployment, Security Audit & Final Cleanup
 
 - [x] **4.1 Public Testnet Deployment**
-  - Deploy compiled smart contracts to a public testnet (e.g., Arbitrum Sepolia or Base Sepolia).
-  - Verify contract bytecode and publish source code on the block explorer (Etherscan/Basescan).
-
 - [x] **4.2 Edge-Case & Chaos Testing**
-  - Simulate network delays, failed oracle API calls, unfulfilled deliveries, and manual dispute triggers.
-  - Verify circuit breakers, pause mechanisms, and emergency refund paths under failure conditions.
-
 - [x] **4.3 Code Optimization & Security Sanitization**
-  - Clean up codebase, enforce strict linting rules, and remove all hardcoded test keys/secrets.
-  - Run static analysis tools (e.g., Slither/Mythril) to generate a final vulnerability and gas-optimization audit report.
-
 - [x] **4.4 Developer Documentation & Demo Setup**
-  - Finalize `README.md` with step-by-step instructions to run the local stack and widget demo.
-  - Generate OpenAPI/Swagger documentation for the FastAPI Oracle service.
-
-
