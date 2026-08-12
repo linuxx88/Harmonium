@@ -54,7 +54,7 @@ Decentralized Stripe enables non-custodial, permissionless e-commerce escrow wit
 - **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `amount`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.
 - **2-of-3 Threshold Oracle Quorum**: settlement requires signatures from two distinct authorized oracle identities. The security model assumes fewer than two authorized oracle keys are compromised or colluding.
 - **Carrier & Order Specific Tracking Hash**: Defined as `keccak256(abi.encode(carrierId, trackingNumber))` and embedded into EIP-712 typed vouchers alongside explicit `carrierId`.
-- **Order State Machine & Gross Surcharge Accounting**: Strict linear state machine `UNINITIALIZED` -> `CREATED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`) with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`). Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
+- **Order State Machine & Gross Surcharge Accounting**: Strict atomic state machine `UNINITIALIZED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`) via `createAndFundOrder` with explicit values (`itemPrice`, `feeAmount`, `grossAmount = itemPrice + feeAmount`). Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
 
 ---
 
@@ -97,6 +97,8 @@ cp .env.example .env
 `.env` setup:
 ```env
 RPC_URL=http://127.0.0.1:8545
+ARBITRUM_SEPOLIA_RPC_URL=https://sepolia.arbitrum.io/rpc
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
 PRIVATE_KEY=0x... (Deployer / Admin Private Key)
 USDC_ADDRESS=0x... (Optional testnet token address)
 ESCROW_ADDRESS=0x... (Deployed Escrow address)
@@ -125,8 +127,8 @@ cd ..
 
 ## 🧪 Testing & Verification
 
-### Hardhat Unit Tests
-Run full suite of smart contract unit tests covering EIP-712 signatures, 2-of-3 threshold quorum, gross surcharge accounting, anti-replay nonces, and non-custodial invariants:
+### Hardhat Unit & Fuzzing Tests
+Run full suite of smart contract unit and property-based fuzzing tests covering EIP-712 signatures, 2-of-3 threshold quorum, gross surcharge accounting, anti-replay nonces, and non-custodial invariants:
 
 ```bash
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat test
@@ -137,6 +139,13 @@ Simulate network latency, circuit breakers, expired escrow timeouts, and signatu
 
 ```bash
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/chaos_test.js
+```
+
+### Automated Testnet Simulation Suite
+Execute end-to-end testnet verification covering dynamic domain separation, gas overhead estimation, block delay confirmations, and wallet interactions:
+
+```bash
+HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/testnet_e2e_simulation.js
 ```
 
 ### End-to-End Flow Simulation
@@ -172,12 +181,16 @@ uvicorn backend.main:app --reload --port 8000
 
 ---
 
-## 🌐 Public Testnet Deployment
+## 🌐 Public Testnet Deployment & E2E Verification
 
-To deploy contracts on Arbitrum Sepolia or Base Sepolia:
+Supported network targets:
+- **Arbitrum Sepolia** (Chain ID: `421614`, Env: `ARBITRUM_SEPOLIA_RPC_URL`)
+- **Base Sepolia** (Chain ID: `84532`, Env: `BASE_SEPOLIA_RPC_URL`)
 
+### Deploy Command
 ```bash
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --network arbitrumSepolia
+HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --network baseSepolia
 ```
 
 ### Verification Command

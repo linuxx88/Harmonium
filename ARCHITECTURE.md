@@ -57,27 +57,41 @@
 6. **Invariant 6**: A voucher cannot be replayed on another chain (`chainId` enforced in EIP-712 domain separator).
 7. **Invariant 7**: A voucher cannot be replayed on another escrow contract (`verifyingContract` address enforced in EIP-712 domain separator).
 8. **Invariant 8**: The seller can never withdraw funds before settlement (funds locked in contract until valid settlement state transition).
-9. **Invariant 9**: The administrator cannot transfer, confiscate, or release escrow funds ("No privileged account can arbitrarily transfer escrowed funds").
-10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters (`feeAmount = itemPrice * PROTOCOL_FEE_BPS / BPS_DENOMINATOR`).
+9. **Invariant 9**: For every escrowed order in state `FUNDED`, no administrative/privileged caller (contract owner, multisig, or operator) can trigger a buyer refund, seller settlement, protocol fee withdrawal, or arbitrary token transfer without satisfying the exact same state, signature (2-of-3 oracle), or deadline requirements enforced on non-privileged actors.
+10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters (`feeAmount = itemPrice * PROTOCOL_FEE_BPS / BPS_DENOMINATOR`). Order fee parameters (`protocolFeeRecipient`, `feeAmount`, `itemPrice`, `grossAmount`) are strictly immutable once the order is funded. Neither contract owner nor any future admin can alter the `protocolFeeRecipient` or `feeAmount` of an existing `FUNDED` order.
 11. **Invariant 11**: A settlement voucher is valid ONLY for the exact order parameters stored on-chain (orderId, buyer, seller, token, amount, carrierId, trackingHash, nonce, voucherDeadline).
+12. **Invariant 12**: Functions `confirmReceiptByBuyer` and `settleWithOracle` (`releaseWithOracle`) strictly enforce the Checks-Effects-Interactions (CEI) pattern: caller and status checks occur first, state mutation to `SETTLED` occurs before any external token transfers.
 
 ## Cryptographic & Deadline Specifications
-- **Decoupled Deadlines**: `fulfillmentDeadline` (order-level expiration for buyer refunds, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 cryptographic signature validity window). Nonces are scoped strictly per order via `usedNonces[orderId][nonce] = true`.
-- **Explicit Carrier Data**: Struct includes `carrierId` and `trackingHash` directly inside EIP-712 typed voucher (`ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 amount,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)`).
+- **Cryptographic Domain Separation**: `chainId` and `verifyingContract` are bound strictly via the EIP-712 domain separator, blocking cross-chain and cross-contract signature replays.
+- **Order Binding**: The release voucher payload explicitly binds `orderId`, `buyer`, `seller`, `token`, `grossAmount`, `itemPrice`, `carrierId`, `trackingHash`, `nonce`, and `voucherDeadline` to guarantee attestations are valid strictly for the intended on-chain order parameters.
+- **Replay Protection**: Replays are strictly prevented via nonces scoped per order and stored directly in mapped state (`usedNonces[orderId][nonce] = true`).
+- **Decoupled Deadlines**: `fulfillmentDeadline` (order-level expiration for buyer refunds, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 cryptographic signature validity window).
+- **Explicit Carrier Data**: Struct includes `carrierId` and `trackingHash` directly inside EIP-712 typed voucher (`ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 grossAmount,uint256 itemPrice,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)`).
+- **Oracle Signer Extraction & Unique Identity Verification**:
+  - `signer0 = ECDSA.recover(digest, signatures[0])`
+  - `signer1 = ECDSA.recover(digest, signatures[1])`
+  - Strict validation: `signer0 != signer1` (distinct oracle identities required) and `isOracleSigner[signer0] && isOracleSigner[signer1]` (both signers must be authorized oracle identities).
+- **Accounting Validation Checks**:
+  - `voucher.grossAmount == order.grossAmount`
+  - `voucher.itemPrice == order.itemPrice`
+  - `order.grossAmount == order.itemPrice + order.feeAmount`
 
 ## State Machine Strict Transition Rules
+- **Enum Specification**: `enum OrderState { UNINITIALIZED, FUNDED, SETTLED, REFUNDED }`
 - **Allowed Transitions**:
-  - `UNINITIALIZED` -> `CREATED` -> `FUNDED` -> (`SETTLED` | `REFUNDED`)
-  - Note: Initial deposit moves order to `FUNDED`. Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
+  - `UNINITIALIZED` -> `FUNDED` (via atomic `createAndFundOrder`)
+  - `FUNDED` -> `SETTLED` (via 2-of-3 Oracle attestation OR buyer voluntary `confirmReceiptByBuyer`)
+  - `FUNDED` -> `REFUNDED` (via `claimRefund` after `fulfillmentDeadline` expiration)
+  - Note: Terminal states `SETTLED` and `REFUNDED` are strictly irreversible.
 - **Forbidden Transitions**:
-  - `CREATED` -> `REFUNDED`
-  - `CREATED` -> `SETTLED`
-  - `FUNDED` -> `CREATED`
+  - `UNINITIALIZED` -> `SETTLED`
+  - `UNINITIALIZED` -> `REFUNDED`
   - `SETTLED` -> `ANY`
   - `REFUNDED` -> `ANY`
 
 ## Circuit Breaker & Pause Rules
-- **Paused Functions (`whenNotPaused`)**: `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer`.
+- **Paused Functions (`whenNotPaused`)**: `createAndFundOrder` (and legacy alias `deposit`), `releaseWithOracle`, `confirmReceiptByBuyer`.
 - **Unpaused Functions (`whenPaused` allowed)**: `claimRefund` remains permanently accessible when paused.
 - **Invariant Notice**: Emergency pause must never create indefinite custody of user funds. Buyer refunds remain permanently accessible after fulfillment deadline expiry even when the contract is paused.
 
