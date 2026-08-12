@@ -60,6 +60,8 @@ To ensure absolute technical transparency, this protocol explicitly defines its 
 - **Oracle Quorum Honesty**: At least 2 out of the 3 authorized oracle signing identities are assumed to remain uncompromised, non-colluding, and online.
 - **Physical-World Oracle Risk**: Carrier delivery APIs (e.g. UPS/FedEx webhooks) are external physical-world data providers; carrier API key compromises or falsified tracking statuses at the carrier level cannot be independently verified on-chain.
 - **Off-Chain Key Security**: Oracle private keys must be stored in secure HSMs/KMS modules; key storage security is an off-chain operational dependency.
+- **Mocked Carrier Verification**: Carrier verification (`verify_carrier_status`) is currently mocked (`MOCK_SHIPPING_DB`) for deterministic local and testnet demonstrations; production integrations require live authenticated carrier WebSockets/Webhooks.
+- **PoC Infrastructure vs Production Topology**: In this PoC demonstration, independent oracle key identities are simulated within the backend service. For mainnet production deployment, each of the 3 oracle signer identities MUST be hosted on separate, isolated private infrastructure nodes (or distinct microservices/HSM modules) feeding into a quorum aggregator.
 - **Unaudited PoC Status**: This codebase is a security-focused Proof of Concept (PoC) and has not undergone an independent third-party audit. It MUST NOT be deployed with production mainnet funds.
 
 ### Key Non-Custodial Invariants & Security Highlights

@@ -5,7 +5,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from web3 import Web3
-from backend.oracle import verify_carrier_status, compute_tracking_hash, OracleSignerNode
+from backend.oracle import verify_carrier_status, compute_tracking_hash, verify_onchain_order_state, OracleSignerNode
+
+WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL", "")
 
 app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Network Service", version="1.0.0")
 
@@ -109,11 +111,24 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
     
     order["buyer"] = order.get("buyer", req.buyer)
     
+    # Verify order state on-chain via Web3 RPC provider if configured
+    is_valid_onchain = verify_onchain_order_state(
+        web3_provider_url=WEB3_PROVIDER_URL,
+        contract_address=order["contract_address"],
+        order_id_hex=order["order_id"],
+        expected_buyer=req.buyer,
+        expected_seller=order["seller"],
+        expected_gross_amount=order["gross_amount"],
+        expected_item_price=order["item_price"]
+    )
+    if not is_valid_onchain:
+        raise HTTPException(status_code=400, detail="On-chain order verification failed! Order state is not FUNDED or parameters mismatch on-chain.")
+
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
         voucher_deadline = int(time.time()) + 3600
-        current_nonce = order_nonces.get(order_id, 0) + 1
-        order_nonces[order_id] = current_nonce
+        # Use nanosecond timestamp as persistent unique nonce to prevent collisions across server restarts
+        current_nonce = int(time.time_ns())
         carrier_id = carrier_info.get("carrier", "UPS")
         tracking_id = order.get("tracking_id", "TRACK123")
         tracking_hash = compute_tracking_hash(carrier_id, tracking_id)
@@ -122,7 +137,10 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
         quorum_attestations = []
         signatures = []
 
-        for node in ORACLE_NODES[:2]:
+        import random
+        # Dynamically select 2 out of all available active oracle nodes (true 2-of-3 threshold quorum)
+        selected_nodes = random.sample(ORACLE_NODES, k=2) if len(ORACLE_NODES) >= 2 else ORACLE_NODES
+        for node in selected_nodes:
             attestation = node.sign_release_voucher(
                 contract_address=order["contract_address"],
                 chain_id=order["chain_id"],
