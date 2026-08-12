@@ -106,8 +106,9 @@ DECENTRALIZED-STRIPE/
 │   ├── index.html                      # Embeddable checkout widget interface
 │   └── widget.js                       # Web3 wallet & contract interaction script
 ├── scripts/
-│   ├── deploy_testnet.js               # Testnet deployment & verification script
 │   ├── chaos_test.js                   # Network delay, invalid sig & pause chaos test suite
+│   ├── demo.js                         # Zero-config standalone E2E demo runner
+│   ├── deploy_testnet.js               # Testnet deployment & verification script
 │   └── simulate_flow.js                # End-to-end integration test runner
 ├── test/
 │   └── DecentralizedStripeEscrow.test.js # Hardhat unit test suite
@@ -174,11 +175,11 @@ Simulate network latency, circuit breakers, expired escrow timeouts, and signatu
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/chaos_test.js
 ```
 
-### Automated Testnet Simulation Suite
-Execute end-to-end testnet verification covering dynamic domain separation, gas overhead estimation, block delay confirmations, and wallet interactions:
+### Zero-Config Standalone E2E Demo Runner
+Execute automated demonstration runner in under 60 seconds simulating both Oracle 2/3 Quorum settlement and Buyer Timeout refund:
 
 ```bash
-HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/testnet_e2e_simulation.js
+npm run demo
 ```
 
 ### End-to-End Flow Simulation

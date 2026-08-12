@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Decentralized Stripe PoC Smart Contracts",
   "scripts": {
-    "test": "hardhat test",
+    "test": "CI=true hardhat test",
     "compile": "hardhat compile",
     "demo": "CI=true hardhat run scripts/demo.js"
   },
