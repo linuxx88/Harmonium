@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 # Ensure test DB is used or mock ORACLE keys if needed
 os.environ["ORACLE1_PRIVATE_KEY"] = "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a6f363173"
 os.environ["ORACLE2_PRIVATE_KEY"] = "0x8b3a350cf5c343ff1d26123497d3910c6aa099d07ee83a48e7150a0005d54519"
+os.environ["WEB3_PROVIDER_URL"] = ""
 
+from unittest.mock import patch
 from backend.main import app
 from backend.database import init_db, DB_PATH
 
