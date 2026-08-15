@@ -241,10 +241,11 @@ npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "
 
 ---
 
-## 🛡 Security & Audit Compliance
+---
 
-- **Zero Hardcoded Keys**: Private keys loaded exclusively via environment variables (`ORACLE1_PRIVATE_KEY`, `ORACLE2_PRIVATE_KEY`, `ORACLE3_PRIVATE_KEY`).
-- **EIP-712 Typed Hashing**: Complete domain separation preventing cross-chain and replay exploits.
-- **SafeERC20 Protection**: Guarded against non-standard ERC-20 transfer behaviors.
-- **Re-entrancy Guard**: Non-reentrant modifiers on all state-changing entrypoints.
+## 📊 Pre-Audit Benchmarks & Stress Tests
+
+Comprehensive multi-agent concurrency and chaos testing metrics (100 agents, 421 transactions, 100% attack rejection rate, gas consumption profiles) are archived in:
+- 📄 [Pre-Audit Benchmark & Stress Test Report (docs/benchmarks/SIMULATION_REPORT.md)](file:///home/ssr/Desktop/DECENTRALIZED-STRIPE/docs/benchmarks/SIMULATION_REPORT.md)
+
 
