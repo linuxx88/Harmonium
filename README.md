@@ -239,13 +239,12 @@ HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --netwo
 npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "[\"<ORACLE1>\",\"<ORACLE2>\",\"<ORACLE3>\"]" "<FEE_RECIPIENT>"
 ```
 
----
-
----
-
 ## 📊 Pre-Audit Benchmarks & Stress Tests
 
 Comprehensive multi-agent concurrency and chaos testing metrics (100 agents, 421 transactions, 100% attack rejection rate, gas consumption profiles) are archived in:
 - 📄 [Pre-Audit Benchmark & Stress Test Report (docs/benchmarks/SIMULATION_REPORT.md)](file:///home/ssr/Desktop/DECENTRALIZED-STRIPE/docs/benchmarks/SIMULATION_REPORT.md)
 
-
+### Running Multi-Agent Stress Simulation:
+```bash
+.venv/bin/python scripts/multi_agent_stress_simulation.py
+```
