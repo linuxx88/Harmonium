@@ -32,7 +32,21 @@ This document records the live integration tests and advanced adversarial scenar
 - **Faucet Tx**: [`0x727d8efa94ae46f12d57e3fb5120eccada2751152b5bbe2a251d013c3a20a508`](https://sepolia.etherscan.io/tx/0x727d8efa94ae46f12d57e3fb5120eccada2751152b5bbe2a251d013c3a20a508)
 - **Impact**: Signer balance increased from 100.0 to 1100.0 tokens.
 
-### Scenario 3: Transfer to Third-Party Random Recipient (25 tokens)
-- **Recipient Address**: `0xd66c98714d5fa6F90F4fb54651DfF976dd98A19d`
-- **Transfer Tx**: [`0xdf268563435ed4390c00a2bec0e5c205f3fe9948ff5879ba07426dc962007842`](https://sepolia.etherscan.io/tx/0xdf268563435ed4390c00a2bec0e5c205f3fe9948ff5879ba07426dc962007842)
-- **Validation**: Recipient balance transitioned from 0.0 to 25.0 tokens.
+---
+
+## 4. Live `HarmoniumPayEscrow` Contract Verification (`0x9e0F50123cac1151782D77099774a58140363dD1`)
+
+### Flow 1: 2-of-3 Oracle EIP-712 Threshold Settlement
+- **Deposit & Fund Tx**: [`0x03172f2dfdd19ac13a0fb86ae875a8c682ac6e3002a69337de74962a0d67e2fe`](https://sepolia.etherscan.io/tx/0x03172f2dfdd19ac13a0fb86ae875a8c682ac6e3002a69337de74962a0d67e2fe)
+- **Settlement (`settleWithOracle`) Tx**: [`0x88b34e29cc2f8504f14aca8de6e0ce03da3f1d4aa34ff2c6f900b538ceff8df0`](https://sepolia.etherscan.io/tx/0x88b34e29cc2f8504f14aca8de6e0ce03da3f1d4aa34ff2c6f900b538ceff8df0)
+- **Outcome**: **PASS** — Smart contract recovered 2 valid distinct oracle signatures on-chain and disbursed 10.0 USDC to seller.
+
+### Flow 2: Direct Buyer Confirmation (`confirmReceiptByBuyer`)
+- **Deposit & Fund Tx**: [`0x4c4caca8a8fba6b955efd557cc2b7b97b8d0741ca6c6bfad92aa33998e6095d0`](https://sepolia.etherscan.io/tx/0x4c4caca8a8fba6b955efd557cc2b7b97b8d0741ca6c6bfad92aa33998e6095d0)
+- **Confirmation Tx**: [`0xe0d0b683ab6cfade6ffa8dd9be6727e98970569682c2caccd42bab2fec56700d`](https://sepolia.etherscan.io/tx/0xe0d0b683ab6cfade6ffa8dd9be6727e98970569682c2caccd42bab2fec56700d)
+- **Outcome**: **PASS** — Instant non-custodial release to seller.
+
+### Flow 3: Timeout Refund Temporal Boundary Check (`claimRefund`)
+- **Premature Refund Invocation**: Evaluated on live order funded on-chain.
+- **Contract Enforcement**: **REVERTED (`TimeoutNotReached`)** — Verified that `claimRefund` is strictly locked until the immutable 7-day fulfillment deadline elapses.
+- **Pending Live Execution**: Live on-chain execution of `claimRefund` remains pending until 7 calendar days have elapsed on Ethereum Sepolia.
