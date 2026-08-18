@@ -60,8 +60,8 @@ class TestMockOracle(unittest.TestCase):
             message_data=voucher
         )
 
-        recovered_0 = Account.recover_typed_data(signable_bytes, signature=sigs[0])
-        recovered_1 = Account.recover_typed_data(signable_bytes, signature=sigs[1])
+        recovered_0 = Account.recover_message(signable_bytes, signature=sigs[0])
+        recovered_1 = Account.recover_message(signable_bytes, signature=sigs[1])
 
         self.assertEqual(recovered_0, addresses[0])
         self.assertEqual(recovered_1, addresses[1])
@@ -112,7 +112,7 @@ class TestMockOracle(unittest.TestCase):
             message_types=EIP712_RELEASE_VOUCHER_TYPES,
             message_data=tampered_data
         )
-        recovered = Account.recover_typed_data(signable_bytes, signature=sigs[0])
+        recovered = Account.recover_message(signable_bytes, signature=sigs[0])
         self.assertNotEqual(recovered, wallets[0].address)
 
 if __name__ == "__main__":

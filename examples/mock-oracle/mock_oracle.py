@@ -50,15 +50,22 @@ def sign_voucher(
         "verifyingContract": Web3.to_checksum_address(contract_address)
     }
 
+    def _ensure_0x_hex32(val):
+        if isinstance(val, bytes):
+            return "0x" + val.hex()
+        if isinstance(val, str):
+            return val if val.startswith("0x") else "0x" + val
+        return val
+
     message_data = {
-        "orderId": order_id_hex,
+        "orderId": _ensure_0x_hex32(order_id_hex),
         "buyer": Web3.to_checksum_address(buyer),
         "seller": Web3.to_checksum_address(seller),
         "token": Web3.to_checksum_address(token),
         "grossAmount": gross_amount,
         "itemPrice": item_price,
         "carrierId": carrier_id,
-        "trackingHash": tracking_hash_hex,
+        "trackingHash": _ensure_0x_hex32(tracking_hash_hex),
         "nonce": nonce,
         "voucherDeadline": voucher_deadline
     }
@@ -93,10 +100,10 @@ def generate_2_of_3_mock_voucher(
         raise ValueError("At least 2 oracle private keys required for 2-of-3 quorum.")
 
     voucher_deadline = int(time.time()) + valid_duration
-    tracking_hash = Web3.keccak(text=f"MOCK_TRACKING_{order_id_hex}").hex()
+    tracking_hash = "0x" + Web3.keccak(text=f"MOCK_TRACKING_{order_id_hex}").hex()
 
     voucher = {
-        "orderId": order_id_hex,
+        "orderId": order_id_hex if order_id_hex.startswith("0x") else "0x" + order_id_hex,
         "buyer": Web3.to_checksum_address(buyer),
         "seller": Web3.to_checksum_address(seller),
         "token": Web3.to_checksum_address(token),
