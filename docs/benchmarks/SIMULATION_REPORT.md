@@ -11,7 +11,7 @@
 
 ## 1. Architecture & Multi-Agent Pool Modeling (5,000 Concurrent Agents)
 
-The stress simulation engine instantiated **5,000 independent agent wallets** operating concurrently against the `HarmoniumPayEscrow` smart contract and SQLite persistence layer:
+The stress simulation engine instantiated **5,000 independent agent wallets** operating concurrently against the `HarmoniumPayEscrow` smart contract:
 
 * **3,500 Buyers:** Autonomous USDC approvals, order creation (`createAndFundOrder`), atomic gross fee surcharge accounting, EIP-712 structured voucher verifications, and direct receipt confirmations.
 * **750 Merchants:** High-throughput order ingestion, tracking hash verification, and fund settlement via 2-of-3 oracle vouchers (`settleWithOracle`).
@@ -30,7 +30,6 @@ The stress simulation engine instantiated **5,000 independent agent wallets** op
 | **Average System Throughput** | 3.46 TPS | > 2.0 TPS | ✅ Stable & Resilient |
 | **Quorum Convergence (2-of-3)** | 33,406.75 ms avg | Under Load Saturation | ✅ Deterministic |
 | **Legitimate Order Success Rate** | 3,550 / 3,550 (100.0%) | 100.0% | ✅ Zero Drop |
-| **SQLite Concurrency Deadlocks** | 0 (WAL Mode + Retries) | 0 | ✅ Zero Deadlocks |
 | **Total Funds Leaked / Confiscated** | 0.00 USDC | 0.00 USDC | ✅ Zero Admin Fund Transfer Authority |
 
 ---
@@ -58,7 +57,6 @@ The stress simulation engine instantiated **5,000 independent agent wallets** op
 | **Actual Security Violations** | 0 | 0 | Zero unauthorized token movements or invariant breaches |
 | **RPC Infrastructure Failures** | 0 | 0 | Zero unhandled JSON-RPC drops / node connection failures |
 | **Network Latency Timeouts** | 0 | 0 | Zero timed-out transaction receipt polling loops |
-| **Database Failures / Deadlocks** | 0 | 0 | Zero unhandled SQLite locks (WAL mode handled concurrent writes) |
 
 ---
 
@@ -80,7 +78,6 @@ The stress simulation engine instantiated **5,000 independent agent wallets** op
 2. **State Machine Irreversibility (Invariants 1 & 2)**: All terminal state transitions (`SETTLED` and `REFUNDED`) remained strictly irreversible.
 3. **Cross-Order Replay Protection (Invariant 5)**: 100% of simulated nonce replay attacks were blocked via per-order nonces (`usedNonces[orderId][nonce]`).
 4. **Quorum Boundary Defense (Invariant 4)**: 2-of-3 threshold was strictly enforced across 250 registered oracle identities under concurrent load.
-5. **Persistence Reliability**: SQLite WAL mode achieved 0 deadlocks across 4,050 asynchronous read/write order state transitions.
 
 ### Security Conclusion & Epistemic Scope
 > **Methodological Boundary**: Passing the multi-agent chaos and adversarial simulation provides empirical evidence that the specific implemented boundaries behaved correctly under the simulated attack scenarios. It **does not constitute formal mathematical proof** or guarantee that the smart contract codebase or off-chain architecture is free from all vulnerabilities, undiscovered edge cases, or novel exploitation vectors. Third-party smart contract audits and formal verification remain necessary prior to production mainnet deployment.
