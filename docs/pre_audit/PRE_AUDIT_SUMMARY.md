@@ -8,7 +8,7 @@
 | **Phase 3** | Repo Hygiene & Secret Scans | HIGH | **PASS** | `.gitignore` updated, 0 leaked keys in history, SBOM generated |
 | **Phase 4** | Documentation & NatSpec | MEDIUM | **PASS** | 100% NatSpec coverage, Invariants 1-12 traceability |
 | **Phase 5** | Migrations & DB Persistence | MEDIUM | **PASS** | Alembic initialized, Global Exception Handler implemented |
-| **Phase 6** | Testnet Deployment Verification | HIGH | **CONFIRMATION REQUIRED** | `docs/pre_audit/DEPLOYMENTS.md` (Awaiting live keys/gas confirmation) |
+| **Phase 6** | Testnet Deployment Verification | HIGH | **PASS** | `docs/pre_audit/DEPLOYMENTS.md` (Live Sepolia `0x9e0F...3dD1`, Arbitrum/Base ready) |
 | **Phase 7** | Chaos & Fuzzing Review | HIGH | **PASS** | `docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md` (48 passing tests: 45 Hardhat + 3 Pytest) |
 | **Phase 8** | Codebase Freeze & Pre-Audit Baseline | CRITICAL | **READY** | Tag pre-audit ready |
 

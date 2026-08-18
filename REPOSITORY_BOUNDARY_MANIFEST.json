@@ -1,0 +1,77 @@
+{
+  "manifest_version": "1.0.0",
+  "project": "Harmonium",
+  "last_updated": "2026-08-18",
+  "public_repository": {
+    "name": "Harmonium Protocol",
+    "scope": "Open-source smart contracts, invariant test suites, protocol specifications, and development fixtures",
+    "license": "GPL-3.0-or-later",
+    "components": {
+      "smart_contracts": [
+        "contracts/HarmoniumPayEscrow.sol",
+        "contracts/MockERC20.sol",
+        "contracts/MockUSDC.sol"
+      ],
+      "test_suites": [
+        "test/HarmoniumPayEscrow.test.js",
+        "test/HarmoniumPayEscrow.fuzz.test.js",
+        "test/oracle_resilience.test.js"
+      ],
+      "development_fixtures": [
+        "examples/mock-oracle/mock_oracle.js",
+        "examples/mock-oracle/mock_oracle.py",
+        "examples/mock-oracle/test_mock_oracle.js",
+        "examples/mock-oracle/test_mock_oracle.py",
+        "examples/mock-oracle/README.md"
+      ],
+      "scripts": [
+        "scripts/chaos_test.js",
+        "scripts/demo.js",
+        "scripts/deploy_testnet.js",
+        "scripts/simulate_flow.js"
+      ],
+      "documentation": [
+        "ARCHITECTURE.md",
+        "README.md",
+        "LICENSE",
+        "docs/SEPOLIA_INTEGRATION_TESTS.md",
+        "docs/pre_audit/COVERAGE_REPORT.md",
+        "docs/pre_audit/STATIC_ANALYSIS_REPORT.md",
+        "docs/pre_audit/DEPLOYMENTS.md",
+        "docs/pre_audit/PRE_AUDIT_SUMMARY.md",
+        "docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md",
+        "docs/protocol/"
+      ]
+    }
+  },
+  "private_repository": {
+    "name": "Harmonium Cloud",
+    "scope": "Proprietary commercial cloud infrastructure, persistence, carrier integrations, merchant APIs, and distributed oracle key management",
+    "license": "Proprietary / Commercial",
+    "components": {
+      "backend_persistence_and_migrations": [
+        "backend/database.py",
+        "backend/harmonium_pay.db",
+        "backend/alembic.ini",
+        "backend/alembic/env.py",
+        "backend/alembic/script.py.mako",
+        "backend/alembic/README",
+        "backend/alembic/versions/"
+      ],
+      "backend_services_and_api": [
+        "backend/main.py",
+        "backend/oracle.py",
+        "backend/requirements.txt"
+      ],
+      "proprietary_categories": [
+        "production_carrier_integrations (FedEx, UPS, DHL, Canada Post live webhooks/APIs)",
+        "merchant_checkout_apis_and_auth",
+        "risk_engine_and_fraud_detection",
+        "billing_and_merchant_settlement",
+        "production_oracle_hsm_kms_infrastructure",
+        "production_secrets_and_vault_management",
+        "cloud_deployment_internals_and_infrastructure_as_code"
+      ]
+    }
+  }
+}
