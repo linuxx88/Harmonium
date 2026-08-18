@@ -9,12 +9,12 @@
 | **Phase 4** | Documentation & NatSpec | MEDIUM | **PASS** | 100% NatSpec coverage, Invariants 1-12 traceability |
 | **Phase 5** | Migrations & DB Persistence | MEDIUM | **PASS** | Alembic initialized, Global Exception Handler implemented |
 | **Phase 6** | Testnet Deployment Verification | HIGH | **CONFIRMATION REQUIRED** | `docs/pre_audit/DEPLOYMENTS.md` (Awaiting live keys/gas confirmation) |
-| **Phase 7** | Chaos & Fuzzing Review | HIGH | **PASS** | `docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md` (41 passing tests) |
+| **Phase 7** | Chaos & Fuzzing Review | HIGH | **PASS** | `docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md` (48 passing tests: 45 Hardhat + 3 Pytest) |
 | **Phase 8** | Codebase Freeze & Pre-Audit Baseline | CRITICAL | **READY** | Tag pre-audit ready |
 
 ---
 
 ## Key Technical Findings & Assurances
 1. **Zero Vulnerability Findings**: Slither static analysis and pip-audit confirmed zero unresolved high or critical vulnerabilities in contract logic and backend runtime.
-2. **Deterministic Invariant Enforcement**: All 12 formal security invariants (terminal states, zero-custody, EIP-712 2-of-3 threshold quorum) pass without exception across 41 automated tests.
+2. **Deterministic Invariant Enforcement**: All 12 formal security invariants (terminal states, zero-custody, EIP-712 2-of-3 threshold quorum) pass without exception across 48 automated tests.
 3. **Resilience & Chaos Resistance**: Smart contracts successfully defended against reentrancy, timestamp manipulation, and front-running race conditions.

@@ -3,7 +3,7 @@
 ## Summary Metrics
 - **Tool**: `solidity-coverage` (v0.8.17)
 - **EVM Target**: Cancun (0.8.24)
-- **Total Passing Tests**: 41 tests across 3 suites (Unit, Fuzzing Invariants, Oracle Chaos & Resilience)
+- **Total Passing Tests**: 48 tests (45 Hardhat tests across 3 suites + 3 Pytest backend tests)
 
 ## Contract Coverage Breakdown
 
@@ -21,15 +21,15 @@
 
 | Invariant ID | Description | Code Location | Test Harness File | Test Status |
 |---|---|---|---|---|
-| **INV-1** | State Machine Irreversibility (Settled cannot refund) | `HarmoniumPayEscrow.sol:331` | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-2** | State Machine Irreversibility (Refunded cannot settle) | `HarmoniumPayEscrow.sol:219` | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-3** | Proof-Gated Settlement (EIP-712 + 2-of-3 threshold) | `HarmoniumPayEscrow.sol:277-309` | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-4** | Quorum Requirement (Strict 2-of-3 oracle verification) | `HarmoniumPayEscrow.sol:278` | `oracle_resilience.test.js` | **PASS** |
-| **INV-5** | Nonce Anti-Replay Constraint (Per-order replay protection) | `HarmoniumPayEscrow.sol:224` | `oracle_resilience.test.js` | **PASS** |
-| **INV-6** | Voucher Expiration Boundary (`voucherDeadline >= block.timestamp`) | `HarmoniumPayEscrow.sol:225` | `HarmoniumPayEscrow.test.js`, `oracle_resilience.test.js` | **PASS** |
-| **INV-7** | Fulfillment Timeout Floor (`fulfillmentDeadline` enforcement) | `HarmoniumPayEscrow.sol:333` | `HarmoniumPayEscrow.test.js`, `oracle_resilience.test.js` | **PASS** |
-| **INV-8** | No Premature Withdrawal (Funds locked until terminal state) | `HarmoniumPayEscrow.sol:318,331` | `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-9** | Admin Zero-Custody Constraint (No privileged arbitrary fund drain) | `HarmoniumPayEscrow.sol` | `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-10** | Immutable Fee Recipient Preservation | `HarmoniumPayEscrow.sol:159,362` | `HarmoniumPayEscrow.test.js` | **PASS** |
-| **INV-11** | Strict Conservation of Funds (`Balance == Sum of active gross amounts`) | `HarmoniumPayEscrow.sol:168,364` | `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
-| **INV-12** | Non-Custodial Emergency Refund (Refund bypasses pause modifier) | `HarmoniumPayEscrow.sol:329` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-1** | Settled cannot refund | `HarmoniumPayEscrow.sol:331` | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
+| **INV-2** | Refunded cannot settle | `HarmoniumPayEscrow.sol:219` | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
+| **INV-3** | Buyer-only refund | `HarmoniumPayEscrow.sol:330` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-4** | Settlement quorum (2-of-3 Oracle sigs OR direct buyer confirm) | `HarmoniumPayEscrow.sol:203,278` | `HarmoniumPayEscrow.test.js`, `oracle_resilience.test.js` | **PASS** |
+| **INV-5** | Cross-order replay protection (Nonces strictly scoped per order) | `HarmoniumPayEscrow.sol:224` | `oracle_resilience.test.js` | **PASS** |
+| **INV-6** | Cross-chain domain isolation (EIP-712 locked to `chainId`) | `HarmoniumPayEscrow.sol:130` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-7** | Cross-contract domain isolation (EIP-712 locked to `verifyingContract`) | `HarmoniumPayEscrow.sol:130` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-8** | No pre-settlement seller withdraw | `HarmoniumPayEscrow.sol:318,331` | `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
+| **INV-9** | Zero admin fund authority (Admin cannot transfer/confiscate funds) | `HarmoniumPayEscrow.sol` | `HarmoniumPayEscrow.fuzz.test.js` | **PASS** |
+| **INV-10** | Fee immutability (Gross amount = itemPrice + feeAmount) | `HarmoniumPayEscrow.sol:159,362` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-11** | Exact parameter binding (Vouchers bind exact on-chain order fields) | `HarmoniumPayEscrow.sol:282-300` | `HarmoniumPayEscrow.test.js` | **PASS** |
+| **INV-12** | Circuit breaker override (`claimRefund` accessible when paused) | `HarmoniumPayEscrow.sol:329` | `HarmoniumPayEscrow.test.js` | **PASS** |

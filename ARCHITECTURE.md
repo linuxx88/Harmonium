@@ -65,20 +65,20 @@ UNINITIALIZED
 
 ## Explicit 12 Security Invariants & Test Verification Matrix
 
-| ID | Invariant Name | Rule Description | Hardhat Test Target | Verification Status |
+| ID | Invariant Name | Rule Description | Test Harness File | Verification Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **INV-1** | Settled cannot refund | Settled order can never be refunded (`SETTLED` -> `REFUNDED` forbidden) | `test_settled_order_cannot_be_refunded` | `PASSED` |
-| **INV-2** | Refunded cannot settle | Refunded order can never be settled (`REFUNDED` -> `SETTLED` forbidden) | `test_refunded_order_cannot_settle` | `PASSED` |
-| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` (`claimRefund` restricts caller) | `test_only_buyer_can_claim_refund` | `PASSED` |
-| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm (`confirmReceiptByBuyer`) | `test_settlement_quorum_or_buyer_only` | `PASSED` |
-| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order (`usedNonces[orderId][nonce]`) | `test_voucher_cannot_cross_orders` | `PASSED` |
-| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` in domain separator | `test_voucher_domain_chain_separation` | `PASSED` |
-| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` in domain separator | `test_voucher_verifying_contract_isolation` | `PASSED` |
-| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `test_seller_cannot_withdraw_pre_settlement` | `PASSED` |
-| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds without oracle/buyer | `test_admin_has_no_fund_transfer_authority` | `PASSED` |
-| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount immutable on funding | `test_fee_parameters_are_immutable` | `PASSED` |
-| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `test_voucher_must_match_order_parameters` | `PASSED` |
-| **INV-12** | Circuit breaker override | `claimRefund` remains accessible when contract paused | `test_refund_accessible_when_paused` | `PASSED` |
+| **INV-1** | Settled cannot refund | Settled order can never be refunded (`SETTLED` -> `REFUNDED` forbidden) | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-2** | Refunded cannot settle | Refunded order can never be settled (`REFUNDED` -> `SETTLED` forbidden) | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` (`claimRefund` restricts caller) | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm (`confirmReceiptByBuyer`) | `HarmoniumPayEscrow.test.js`, `oracle_resilience.test.js` | `PASSED` |
+| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order (`usedNonces[orderId][nonce]`) | `oracle_resilience.test.js` | `PASSED` |
+| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` in domain separator | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` in domain separator | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds without oracle/buyer | `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount immutable on funding | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-12** | Circuit breaker override | `claimRefund` remains accessible when contract paused | `HarmoniumPayEscrow.test.js` | `PASSED` |
 
 ## Cryptographic & Deadline Specifications
 - **Cryptographic Domain Separation**: `chainId` and `verifyingContract` are bound strictly via the EIP-712 domain separator, blocking cross-chain and cross-contract signature replays.
@@ -122,6 +122,10 @@ To maintain strict compliance with **Invariant 9** (*No privileged account can a
    - Admin rotation of oracle signers does **NOT** grant the admin custody or transfer rights over escrowed funds.
    - To settle an order after rotation, the admin must control at least 2 valid, active oracle private keys *AND* generate a cryptographically valid EIP-712 `ReleaseVoucher` matching the exact on-chain order parameters.
    - If the buyer does not receive delivery, the buyer retains their autonomous right to execute `claimRefund` once `fulfillmentDeadline` expires, regardless of any oracle key rotations performed by the admin.
+
+### Off-Chain Oracle Infrastructure: PoC vs Production
+- **PoC Topology (Current)**: All 3 oracle signing identities are colocated in a single backend process (`backend/main.py`) for simplified local testing, continuous integration, and benchmark reproducibility.
+- **Production Architecture**: 3 physically isolated signer microservices (each hosting a single private key in a dedicated KMS/HSM module and validating shipment webhooks independently) communicating via authenticated internal RPC/gRPC with a stateless quorum coordinator.
 
 ## State Machine Strict Transition Rules
 - **Enum Specification**: `enum OrderState { UNINITIALIZED, FUNDED, SETTLED, REFUNDED }`

@@ -3,7 +3,7 @@
 > [!WARNING]
 > **DISCLAIMER**: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
 
-**Harmonium Pay** is a security-focused Web3 escrow Proof of Concept (PoC) and engineering benchmark demonstrating production-oriented design principles, cryptographic physical delivery settlement, and formal invariant testing on EVM networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
+**Harmonium Pay** is a security-focused Web3 escrow Proof of Concept (PoC) and engineering benchmark demonstrating production-oriented design principles, cryptographic physical delivery settlement, and formal invariant testing on local EVM networks, with deployment readiness for Arbitrum Sepolia and Base Sepolia.
 
 ---
 
@@ -110,29 +110,29 @@ To ensure absolute technical transparency, this protocol explicitly defines its 
 - **Physical-World Oracle Risk**: Carrier delivery APIs (e.g. UPS/FedEx webhooks) are external physical-world data providers; carrier API key compromises or falsified tracking statuses at the carrier level cannot be independently verified on-chain.
 - **Off-Chain Key Security**: Oracle private keys must be stored in secure HSMs/KMS modules; key storage security is an off-chain operational dependency.
 - **Mocked Carrier Verification**: Carrier verification (`verify_carrier_status`) is currently mocked (`MOCK_SHIPPING_DB`) for deterministic local and testnet demonstrations; production integrations require live authenticated carrier WebSockets/Webhooks.
-- **PoC Infrastructure vs Production Topology**: In this PoC demonstration, independent oracle key identities are simulated within the backend service. For mainnet production deployment, each of the 3 oracle signer identities MUST be hosted on separate, isolated private infrastructure nodes (or distinct microservices/HSM modules) feeding into a quorum aggregator.
+- **PoC Infrastructure vs Production Topology**: In this PoC demonstration, all 3 oracle signing identities are colocated within a single backend service for local testing and benchmark reproducibility. In production, this architecture MUST be replaced by 3 physically isolated signer microservices (each controlling 1 private key / HSM) coordinated by a lightweight aggregation service over authenticated internal channels.
 - **Unaudited PoC Status**: This codebase is a security-focused Proof of Concept (PoC) and has not undergone an independent third-party audit. It MUST NOT be deployed with production mainnet funds.
 
 ### Key Non-Custodial Invariants & Security Highlights
 - **12 Explicit Security Invariants & Test Verification Matrix**:
 
-| ID | Invariant Name | Rule Description | Hardhat Test Target | Verification Status |
+| ID | Invariant Name | Rule Description | Test Harness File | Verification Status |
 | :--- | :--- | :--- | :--- | :--- |
-| **INV-1** | Settled cannot refund | Settled order can never be refunded | `test_settled_order_cannot_be_refunded` | `PASSED` |
-| **INV-2** | Refunded cannot settle | Refunded order can never be settled | `test_refunded_order_cannot_settle` | `PASSED` |
-| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` | `test_only_buyer_can_claim_refund` | `PASSED` |
-| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm | `test_settlement_quorum_or_buyer_only` | `PASSED` |
-| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order | `test_voucher_cannot_cross_orders` | `PASSED` |
-| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` | `test_voucher_domain_chain_separation` | `PASSED` |
-| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` | `test_voucher_verifying_contract_isolation` | `PASSED` |
-| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `test_seller_cannot_withdraw_pre_settlement` | `PASSED` |
-| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds | `test_admin_has_no_fund_transfer_authority` | `PASSED` |
-| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount | `test_fee_parameters_are_immutable` | `PASSED` |
-| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `test_voucher_must_match_order_parameters` | `PASSED` |
-| **INV-12** | Circuit breaker override | `claimRefund` accessible when paused | `test_refund_accessible_when_paused` | `PASSED` |
+| **INV-1** | Settled cannot refund | Settled order can never be refunded | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-2** | Refunded cannot settle | Refunded order can never be settled | `HarmoniumPayEscrow.test.js`, `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm | `HarmoniumPayEscrow.test.js`, `oracle_resilience.test.js` | `PASSED` |
+| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order | `oracle_resilience.test.js` | `PASSED` |
+| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds | `HarmoniumPayEscrow.fuzz.test.js` | `PASSED` |
+| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `HarmoniumPayEscrow.test.js` | `PASSED` |
+| **INV-12** | Circuit breaker override | `claimRefund` accessible when paused | `HarmoniumPayEscrow.test.js` | `PASSED` |
 
 - **Circuit Breaker Pause Rules**:
-  - `deposit`, `releaseWithOracle`, `confirmReceiptByBuyer` are paused during circuit breaker activation.
+  - `createAndFundOrder`, `releaseWithOracle`, `confirmReceiptByBuyer` are paused during circuit breaker activation.
   - `claimRefund` remains permanently accessible when paused to prevent indefinite custody of user funds (`INV-12`).
 - **Race Condition Resolution**: On-chain transaction ordering determines state. Whichever valid transaction (`SETTLED` or `REFUNDED`) hits the block first seals the terminal state.
 - **EIP-712 Typed Data Signatures**: Structured EIP-712 typed vouchers (`domainSeparator`, `orderId`, `buyer`, `seller`, `token`, `grossAmount`, `itemPrice`, `carrierId`, `trackingHash`, `nonce`, `voucherDeadline`) to block cross-chain, cross-contract, and replay attacks.

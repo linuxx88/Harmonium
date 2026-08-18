@@ -42,14 +42,14 @@ def verify_onchain_order_state(
     """
     Verifies that the order exists on-chain, is in FUNDED state (state == 1),
     and that on-chain buyer, seller, grossAmount, and itemPrice strictly match expected values.
-    Returns True if on-chain state matches or if web3 provider is unavailable (fallback mode).
+    Fails closed (returns False) if web3 provider is unavailable or RPC query fails.
     """
     if not web3_provider_url:
-        return True
+        return False
     try:
         w3 = Web3(Web3.HTTPProvider(web3_provider_url))
         if not w3.is_connected():
-            return True
+            return False
         abi = [
             {
                 "inputs": [{"name": "", "type": "bytes32"}],
@@ -83,7 +83,7 @@ def verify_onchain_order_state(
             return False
         return True
     except Exception:
-        return True
+        return False
 
 class OracleSignerNode:
     """

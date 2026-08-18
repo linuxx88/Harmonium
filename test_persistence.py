@@ -18,7 +18,8 @@ class TestSQLitePersistence(unittest.TestCase):
         init_db()
         cls.client = TestClient(app)
 
-    def test_persistence_across_restart(self):
+    @patch("backend.main.verify_onchain_order_state", return_value=True)
+    def test_persistence_across_restart(self, mock_verify):
         order_id = "0x" + "1" * 64
         session_req = {
             "order_id": order_id,
@@ -57,6 +58,16 @@ class TestSQLitePersistence(unittest.TestCase):
         self.assertIsNotNone(persisted_order["signatures"])
         self.assertTrue(len(persisted_order["signatures"]) >= 2)
         print("\n[SUCCESS] Persistence verified! Status 'ready_for_release' and signatures retained across simulated restart.")
+
+    def test_verify_onchain_order_state_fails_closed_when_empty_url(self):
+        from backend.oracle import verify_onchain_order_state
+        result = verify_onchain_order_state("", "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", "0x" + "2" * 64, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "0x3C44CdDDB6a900fa2b585dd299e03d12FA4293BC", 1001000, 1000000)
+        self.assertFalse(result)
+
+    def test_verify_onchain_order_state_fails_closed_when_rpc_unreachable(self):
+        from backend.oracle import verify_onchain_order_state
+        result = verify_onchain_order_state("http://127.0.0.1:9999", "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", "0x" + "3" * 64, "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "0x3C44CdDDB6a900fa2b585dd299e03d12FA4293BC", 1001000, 1000000)
+        self.assertFalse(result)
 
 if __name__ == "__main__":
     unittest.main()
