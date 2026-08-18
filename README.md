@@ -295,10 +295,21 @@ npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "
 npx hardhat verify --network baseSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "[\"<ORACLE1>\",\"<ORACLE2>\",\"<ORACLE3>\"]" "<FEE_RECIPIENT>"
 ```
 
-## 📊 Pre-Audit Benchmarks & Stress Tests
+## 📚 Documentation & Pre-Audit Test Reports (`docs/`)
 
-Comprehensive enterprise multi-agent concurrency and chaos testing metrics (5,000 agents, 12,250 transactions mined, 100% attack rejection rate, gas consumption profiles) are archived in:
-- 📄 [Pre-Audit Benchmark & Stress Test Report (docs/benchmarks/SIMULATION_REPORT.md)](docs/benchmarks/SIMULATION_REPORT.md)
+Comprehensive test results, static analysis reports, stress benchmarks, and live testnet verification runs are documented in the [`docs/`](docs/) folder:
+
+### 🧪 Test & Simulation Reports
+- 📄 [**Live Sepolia Integration Tests** (`docs/SEPOLIA_INTEGRATION_TESTS.md`)](docs/SEPOLIA_INTEGRATION_TESTS.md) — On-chain Sepolia execution report with verified transaction hashes (allowance revert, faucet, transfers).
+- 📄 [**Pre-Audit Concurrency & Chaos Benchmark** (`docs/benchmarks/SIMULATION_REPORT.md`)](docs/benchmarks/SIMULATION_REPORT.md) — 5,000-agent concurrency simulation, 12,250 mined transactions, 100% attack rejection rate, and gas profiles.
+- 📄 [**Additional Chaos Attack Tests** (`docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md`)](docs/pre_audit/ADDITIONAL_CHAOS_TESTS.md) — Reentrancy defense, timestamp manipulation, and mempool front-running chaos vectors.
+
+### 🛡️ Audit & Security Dossier
+- 📄 [**Pre-Audit Summary Dossier** (`docs/pre_audit/PRE_AUDIT_SUMMARY.md`)](docs/pre_audit/PRE_AUDIT_SUMMARY.md) — Synthesis of contract invariants, architectural boundaries, and test matrices.
+- 📄 [**Code Coverage Report** (`docs/pre_audit/COVERAGE_REPORT.md`)](docs/pre_audit/COVERAGE_REPORT.md) — 100% statement and function coverage report.
+- 📄 [**Static Analysis Report** (`docs/pre_audit/STATIC_ANALYSIS_REPORT.md`)](docs/pre_audit/STATIC_ANALYSIS_REPORT.md) — Slither vulnerability analysis results and remediations.
+- 📄 [**Deployment & Multi-Network Plan** (`docs/pre_audit/DEPLOYMENTS.md`)](docs/pre_audit/DEPLOYMENTS.md) — Target networks, configuration, and verification procedures.
+- 📄 [**Migration & Upgrade Guide** (`docs/pre_audit/MIGRATION_GUIDE.md`)](docs/pre_audit/MIGRATION_GUIDE.md) — Upgrade paths and backward compatibility details.
 
 ### Running Multi-Agent Stress Simulation:
 ```bash
