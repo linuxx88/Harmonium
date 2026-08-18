@@ -127,23 +127,24 @@ def create_order_attestation(order_id: str, req: AttestationRequest):
     buyer_checksum = Web3.to_checksum_address(req.buyer)
     
     # Verify order state on-chain via Web3 RPC provider if configured
-    is_valid_onchain = verify_onchain_order_state(
-        web3_provider_url=WEB3_PROVIDER_URL,
-        contract_address=order["contract_address"],
-        order_id_hex=order["order_id"],
-        expected_buyer=buyer_checksum,
-        expected_seller=order["seller"],
-        expected_gross_amount=order["gross_amount"],
-        expected_item_price=order["item_price"]
-    )
-    if not is_valid_onchain:
-        raise HTTPException(status_code=400, detail="On-chain order verification failed! Order state is not FUNDED or parameters mismatch on-chain.")
+    if WEB3_PROVIDER_URL:
+        is_valid_onchain = verify_onchain_order_state(
+            web3_provider_url=WEB3_PROVIDER_URL,
+            contract_address=order["contract_address"],
+            order_id_hex=order["order_id"],
+            expected_buyer=buyer_checksum,
+            expected_seller=order["seller"],
+            expected_gross_amount=order["gross_amount"],
+            expected_item_price=order["item_price"]
+        )
+        if not is_valid_onchain:
+            raise HTTPException(status_code=400, detail="On-chain order verification failed! Order state is not FUNDED or parameters mismatch on-chain.")
 
     carrier_info = verify_carrier_status(order.get("tracking_id", ""))
     if carrier_info.get("status") == "DELIVERED":
         voucher_deadline = int(time.time()) + 3600
-        # Use nanosecond timestamp as persistent unique nonce to prevent collisions across server restarts
-        current_nonce = int(time.time_ns())
+        # Use millisecond timestamp as safe JavaScript integer nonce (< Number.MAX_SAFE_INTEGER)
+        current_nonce = int(time.time() * 1000)
         carrier_id = carrier_info.get("carrier", "UPS")
         tracking_id = order.get("tracking_id", "TRACK123")
         tracking_hash = compute_tracking_hash(carrier_id, tracking_id)

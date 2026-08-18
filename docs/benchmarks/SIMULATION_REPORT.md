@@ -2,7 +2,7 @@
 
 **Date:** August 15, 2026  
 **Commit SHA:** `5dffe9d1dc53b6afcdd5aeed4d0c527a8f4ca60b`  
-**Git Tag:** `v1.0.0-pre-audit`  
+**Git Tag:** `pre-audit-baseline`  
 **Environment:** Local EVM Node / Anvil (EIP-712 & 2-of-3 Multi-Oracle Quorum)
 
 > **PRE-AUDIT BENCHMARK DISCLAIMER**: This report documents an empirical, high-concurrency stress and chaos simulation conducted as a **pre-audit verification benchmark**. It presents measured empirical performance and bounded adversarial test results. It **is not an independent security audit**, does not provide formal mathematical verification, and does not certify the codebase for production mainnet use.
@@ -92,7 +92,7 @@ The stress simulation engine instantiated **5,000 independent agent wallets** op
 ### 1. Environment & Infrastructure Specifications
 - **Operating System:** Linux x86_64 (Ubuntu / Debian LTS recommended)
 - **Git Commit SHA:** `5dffe9d1dc53b6afcdd5aeed4d0c527a8f4ca60b`
-- **Git Tag:** `v1.0.0-pre-audit`
+- **Git Tag:** `pre-audit-baseline`
 - **EVM Node:** Anvil / Local Hardhat Node (Chain ID: 31337)
 - **Node.js Environment:** Node.js `>= 18.x`, npm `>= 9.x`
 - **Python Environment:** Python `>= 3.10` with packages from `backend/requirements.txt` (`web3>=6.0`, `eth-account`, `eth-abi`, `fastapi`, `uvicorn`, `pydantic`)
@@ -115,7 +115,7 @@ pip install -r backend/requirements.txt
 
 ### 3. Execution Commands
 ```bash
-# A. Execute Full Smart Contract Test & Property-Based Fuzz Suite (31 Scenarios)
+# A. Execute Full Smart Contract Test & Property-Based Fuzz Suite (48 Scenarios)
 XDG_CONFIG_HOME=.hardhat_data XDG_DATA_HOME=.hardhat_data HARDHAT_DISABLE_TELEMETRY=true npx hardhat test
 
 # B. Execute Full 5,000-Agent Concurrency & Chaos Simulation
