@@ -12,11 +12,18 @@ async function main() {
   console.log(`MockUSDC deployed to: ${usdc.address}`);
 
   const { spawn } = require("child_process");
+  const path = require("path");
 
-  // 2. Setup Oracle Signer Wallets matching backend keys
-  const oraclePk1 = "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a6f363173";
-  const oraclePk2 = "0x8b3a350cf5c343ff1d26123497d3910c6aa099d07ee83a48e7150a0005d54519";
-  const oraclePk3 = "0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e";
+  // 2. Setup Oracle Signer Wallets from environment variables (fail closed)
+  const oraclePk1 = process.env.ORACLE1_PRIVATE_KEY || process.env.TEST_ORACLE1_PRIVATE_KEY;
+  const oraclePk2 = process.env.ORACLE2_PRIVATE_KEY || process.env.TEST_ORACLE2_PRIVATE_KEY;
+  const oraclePk3 = process.env.ORACLE3_PRIVATE_KEY || process.env.TEST_ORACLE3_PRIVATE_KEY;
+
+  if (!oraclePk1 || !oraclePk2 || !oraclePk3) {
+    throw new Error(
+      "Missing required oracle private keys for E2E simulation! Please set ORACLE1_PRIVATE_KEY, ORACLE2_PRIVATE_KEY, and ORACLE3_PRIVATE_KEY (or TEST_ORACLE* equivalents) in the environment."
+    );
+  }
   
   const oracle1 = new ethers.Wallet(oraclePk1, ethers.provider);
   const oracle2 = new ethers.Wallet(oraclePk2, ethers.provider);
@@ -30,21 +37,23 @@ async function main() {
   const chainId = (await ethers.provider.getNetwork()).chainId;
 
   // 3. Launch backend FastAPI server for E2E REST attestation
+  const backendPort = process.env.BACKEND_PORT || "8009";
+  const backendHost = process.env.BACKEND_HOST || "127.0.0.1";
+  const pythonPath = process.env.PYTHON_PATH || path.join(__dirname, "..", ".venv", "bin", "python3");
+
   const backendEnv = Object.assign({}, process.env, {
     ORACLE1_PRIVATE_KEY: oraclePk1,
     ORACLE2_PRIVATE_KEY: oraclePk2,
     ORACLE3_PRIVATE_KEY: oraclePk3,
-    WEB3_PROVIDER_URL: ""
   });
 
-  const venvPython = "/home/ssr/Desktop/HARMONIUM/.venv/bin/python3";
-  const backendProc = spawn(venvPython, ["-m", "uvicorn", "backend.main:app", "--port", "8009"], {
+  const backendProc = spawn(pythonPath, ["-m", "uvicorn", "backend.main:app", "--host", backendHost, "--port", backendPort], {
     env: backendEnv,
     stdio: "inherit"
   });
 
   // Wait for backend to be ready
-  const BACKEND_URL = "http://127.0.0.1:8009";
+  const BACKEND_URL = `http://${backendHost}:${backendPort}`;
   let backendReady = false;
   for (let i = 0; i < 30; i++) {
     try {
