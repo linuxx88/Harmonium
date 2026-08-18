@@ -3,9 +3,11 @@ import os
 import json
 from fastapi.testclient import TestClient
 
-# Ensure test DB is used or mock ORACLE keys if needed
-os.environ["ORACLE1_PRIVATE_KEY"] = "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a6f363173"
-os.environ["ORACLE2_PRIVATE_KEY"] = "0x8b3a350cf5c343ff1d26123497d3910c6aa099d07ee83a48e7150a0005d54519"
+import secrets
+
+# Generate disposable ephemeral test accounts for test environment
+os.environ["ORACLE1_PRIVATE_KEY"] = "0x" + secrets.token_hex(32)
+os.environ["ORACLE2_PRIVATE_KEY"] = "0x" + secrets.token_hex(32)
 os.environ["WEB3_PROVIDER_URL"] = ""
 
 from unittest.mock import patch
