@@ -10,7 +10,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DecentralizedStripeEscrow - Oracle Resilience & Chaos Test Suite", function () {
+describe("HarmoniumPayEscrow - Oracle Resilience & Chaos Test Suite", function () {
   let mockUSDC, escrow;
   let owner, buyer, seller, oracle1, oracle2, oracle3, feeRecipient, attacker;
 
@@ -38,7 +38,7 @@ describe("DecentralizedStripeEscrow - Oracle Resilience & Chaos Test Suite", fun
   async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, grossAmount, itemPrice, carrierId, trackingHash, nonce, voucherDeadline) {
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const domain = {
-      name: "DecentralizedStripeEscrow",
+      name: "HarmoniumPayEscrow",
       version: "1",
       chainId: chainId,
       verifyingContract: escrow.address
@@ -82,7 +82,7 @@ describe("DecentralizedStripeEscrow - Oracle Resilience & Chaos Test Suite", fun
     mockUSDC = await MockUSDC.deploy();
     await mockUSDC.deployed();
 
-    const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+    const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
     escrow = await Escrow.deploy(
       mockUSDC.address,
       [oracle1.address, oracle2.address, oracle3.address],
@@ -135,7 +135,7 @@ describe("DecentralizedStripeEscrow - Oracle Resilience & Chaos Test Suite", fun
     await expectRevertCustomError(
       escrow.settleWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2Forged]),
       escrow,
-      "InvalidSignature"
+      "InvalidQuorum"
     );
 
     const order = await escrow.orders(ORDER_ID);
@@ -181,11 +181,104 @@ describe("DecentralizedStripeEscrow - Oracle Resilience & Chaos Test Suite", fun
     const sig1 = await createEIP712Signature(oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, mismatchedHash, 1, voucherDeadline);
     const sig2 = await createEIP712Signature(oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, mismatchedHash, 1, voucherDeadline);
 
-    // Submitting trackingHash != expected mismatchedHash in digest recovery causes InvalidSignature revert
+    // Submitting trackingHash != expected mismatchedHash in digest recovery causes InvalidQuorum revert
     await expectRevertCustomError(
       escrow.settleWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]),
       escrow,
-      "InvalidSignature"
+      "InvalidQuorum"
     );
   });
+
+  describe("Phase 7 - Additional Chaos & Attack Vectors", function () {
+    it("Vector A: Reentrancy Defense & CEI Compliance", async function () {
+      const orderIdVecA = ethers.utils.id("CHAOS_REENTRANCY_VECTOR");
+      await escrow.connect(buyer).deposit(orderIdVecA, seller.address, ITEM_PRICE);
+
+      const block = await ethers.provider.getBlock("latest");
+      const voucherDeadline = block.timestamp + 3600;
+
+      const sig1 = await createEIP712Signature(oracle1, orderIdVecA, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline);
+      const sig2 = await createEIP712Signature(oracle2, orderIdVecA, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline);
+
+      await escrow.settleWithOracle(orderIdVecA, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]);
+      const order = await escrow.orders(orderIdVecA);
+      expect(order.state).to.equal(2); // SETTLED
+
+      // Any reentrant or secondary attempt immediately reverts due to state != FUNDED
+      await expectRevertCustomError(
+        escrow.settleWithOracle(orderIdVecA, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]),
+        escrow,
+        "InvalidStatus"
+      );
+    });
+
+
+    it("Vector B: Block Timestamp Boundary Manipulation on Deadlines", async function () {
+      const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
+      const freshEscrow = await Escrow.deploy(
+        mockUSDC.address,
+        [oracle1.address, oracle2.address, oracle3.address],
+        feeRecipient.address
+      );
+      await freshEscrow.deployed();
+      await mockUSDC.connect(buyer).approve(freshEscrow.address, INITIAL_MINT);
+
+      const orderIdBound = ethers.utils.id("CHAOS_TIMESTAMP_BOUNDARY_ISOLATED");
+      await freshEscrow.connect(buyer).deposit(orderIdBound, seller.address, ITEM_PRICE);
+
+      const order = await freshEscrow.orders(orderIdBound);
+      const deadline = order.fulfillmentDeadline.toNumber();
+
+      // At exactly deadline - 10s, claimRefund MUST revert
+      const currentBlock = await ethers.provider.getBlock("latest");
+      const timeToAdvance = deadline - currentBlock.timestamp - 10;
+      if (timeToAdvance > 0) {
+        await ethers.provider.send("evm_increaseTime", [timeToAdvance]);
+        await ethers.provider.send("evm_mine");
+      }
+
+      await expectRevertCustomError(
+        freshEscrow.connect(buyer).claimRefund(orderIdBound),
+        freshEscrow,
+        "TimeoutNotReached"
+      );
+
+      // Advance time past fulfillment deadline
+      await ethers.provider.send("evm_increaseTime", [20]);
+      await ethers.provider.send("evm_mine");
+
+      await freshEscrow.connect(buyer).claimRefund(orderIdBound);
+      const refundedOrder = await freshEscrow.orders(orderIdBound);
+      expect(refundedOrder.state).to.equal(3); // REFUNDED
+    });
+
+
+
+    it("Vector C: Front-running / Mempool Race Condition between Settle and Refund", async function () {
+      const orderIdRace = ethers.utils.id("CHAOS_MEMPOOL_RACE");
+      await escrow.connect(buyer).deposit(orderIdRace, seller.address, ITEM_PRICE);
+
+      // Advance time past fulfillment deadline
+      await ethers.provider.send("evm_increaseTime", [7 * 86400 + 10]);
+      await ethers.provider.send("evm_mine");
+
+      const block = await ethers.provider.getBlock("latest");
+      const voucherDeadline = block.timestamp + 3600;
+      const grossAmount = (await escrow.orders(orderIdRace)).grossAmount;
+
+      const sig1 = await createEIP712Signature(oracle1, orderIdRace, buyer.address, seller.address, mockUSDC.address, grossAmount, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline);
+      const sig2 = await createEIP712Signature(oracle2, orderIdRace, buyer.address, seller.address, mockUSDC.address, grossAmount, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline);
+
+      // Tx1 mined: Buyer claimRefund
+      await escrow.connect(buyer).claimRefund(orderIdRace);
+
+      // Tx2 in mempool: Attacker/Seller settleWithOracle executes second -> MUST REVERT with InvalidStatus
+      await expectRevertCustomError(
+        escrow.settleWithOracle(orderIdRace, grossAmount, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]),
+        escrow,
+        "InvalidStatus"
+      );
+    });
+  });
+
 });

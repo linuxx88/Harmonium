@@ -21,10 +21,10 @@ async function main() {
   await usdc.mint(buyer.address, grossAmount);
 
   // 2. Deploy Escrow Contract with 2-of-3 threshold
-  const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+  const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
   const escrow = await Escrow.deploy(usdc.address, [oracle1.address, oracle2.address, oracle3.address], feeRecipient.address);
   await escrow.deployed();
-  console.log(`DecentralizedStripeEscrow deployed to: ${escrow.address}`);
+  console.log(`HarmoniumPayEscrow deployed to: ${escrow.address}`);
 
   // 3. Buyer approves and deposits
   const orderId = ethers.utils.id("ORDER_SIM_999");
@@ -42,7 +42,7 @@ async function main() {
   const voucherDeadline = block.timestamp + 3600;
 
   const domain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: chainId,
     verifyingContract: escrow.address

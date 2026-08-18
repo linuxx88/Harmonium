@@ -19,7 +19,7 @@ async function main() {
   const usdc = await MockUSDC.deploy();
   await usdc.deployed();
 
-  const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+  const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
   const escrow = await Escrow.deploy(usdc.address, [oracle1.address, oracle2.address, oracle3.address], feeRecipient.address);
   await escrow.deployed();
 
@@ -56,7 +56,7 @@ async function main() {
   const trackingHash = await escrow.computeTrackingHash(carrierId, "TRACKING_UPS");
 
   const domain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: chainId,
     verifyingContract: escrow.address

@@ -1,26 +1,71 @@
-# Decentralized Stripe PoC
+# Harmonium Pay PoC
 
 > [!WARNING]
 > **DISCLAIMER**: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
 
-Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement on Ethereum Virtual Machine (EVM) compatible networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
+**Harmonium Pay** is a security-focused Web3 escrow Proof of Concept (PoC) and engineering benchmark demonstrating production-oriented design principles, cryptographic physical delivery settlement, and formal invariant testing on EVM networks (Arbitrum Sepolia, Base Sepolia, Hardhat Local).
 
 ---
 
-## 🎯 Target Engineering Roles & Capability Mapping
+## 💎 Portfolio & Professional Engineering Highlights
 
-This repository is engineered as a security-focused engineering benchmark demonstrating competency across 4 core Web3 engineering specializations:
+This project demonstrates production-grade Solidity security engineering, cryptographic attestation, adversarial testing, and end-to-end full-stack Web3 architecture:
 
-1. **Solidity / Smart Contract Developer**: Hardened state machines, OpenZeppelin integration, `ReentrancyGuard`, `Pausable`, `SafeERC20`, and EIP-712 cryptographic verification (`DecentralizedStripeEscrow.sol`).
-2. **Web3 Payment Developer**: Non-custodial USDC payment flows, atomic buyer-paid fee surcharges, settlement/refund lifecycle management, and stablecoin escrow mechanics.
-3. **Blockchain Security Developer**: Strict mathematical invariants, cross-chain domain separation, per-order anti-replay nonces, circuit breaker pause logic, property-based fuzzing, and adversarial chaos testing.
-4. **Full-Stack Web3 Developer**: End-to-end integration spanning HTML5/Ethers.js frontend, Web3 wallet widget, smart contract state, Python FastAPI oracle backend, EIP-712 signing engine, and Web2 carrier webhooks.
+* **🛡️ Solidity Security Engineering**: Atomic 4-state lifecycle (`UNINITIALIZED` -> `FUNDED` -> `SETTLED` | `REFUNDED`), Checks-Effects-Interactions (CEI), `ReentrancyGuard`, `Pausable` circuit breaker, and zero administrative fund custody (`Invariant 9`).
+* **✍️ EIP-712 Cryptographic Attestation**: Domain-separated typed structured data binding `chainId`, `verifyingContract`, `orderId`, price, carrier, and per-order anti-replay nonces (`usedNonces`).
+* **🏛️ 2-of-3 Threshold Oracle Quorum**: On-chain threshold multisig signature verification (`ECDSA.recover`) requiring $\ge 2$ distinct authorized oracle keys.
+* **🧪 Property-Based Fuzzing & Invariant Testing**: Hardhat fuzz suite proving 12 explicit mathematical security invariants across randomized execution orders.
+* **⚡ 5,000-Agent Concurrency & Chaos Simulation**: High-throughput async engine simulating 3,500 buyers, 750 merchants, 500 adversarial chaos attackers, and 250 oracles on a local EVM node with SQLite WAL persistence.
+* **🌐 End-to-End Web3 Integration**: Modular architecture spanning Solidity smart contracts, Python/FastAPI oracle backend, Ethers.js checkout widget, and Web2 carrier tracking pipelines.
+
+### 📊 Measurable Empirical Evidence (Pre-Audit Stress Benchmark)
+
+The following metrics were measured during the 5,000-agent concurrency and chaos stress run on local EVM infrastructure:
+
+* **👥 5,000 Concurrent Simulated Agents**: 3,500 autonomous buyers, 750 merchants, 500 adversarial chaos actors, and 250 independent oracle signing nodes executed in parallel.
+* **⚡ 12,250 Mined Transactions**: Full lifecycle operations processed without unhandled RPC drops or contract halts.
+* **🛡️ 500 Adversarial Attack Attempts Rejected**: 100% of tested attack vectors (truncated signatures, duplicate signers, forged payloads, replay nonces, unauthorized keys) reverted on-chain.
+* **🚀 3.46 TPS Average Throughput**: Sustained end-to-end throughput across multi-step order lifecycles and oracle quorum aggregation.
+* **💰 0.00 USDC Fund Leakage**: Zero unauthorized withdrawals or administrative confiscations across all tested state transitions.
+* **🗄️ 0 SQLite Concurrency Deadlocks**: WAL (Write-Ahead Logging) mode and busy-retry handlers prevented database locks across 4,050 concurrent order mutations.
+
+> *Note: These figures represent empirical pre-audit stress benchmark results under local simulated load and do not constitute third-party audit certification.*
 
 ---
 
-## 📖 System Overview
+## 💼 What This Demonstrates (For Technical Clients)
 
-Decentralized Stripe enables non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement by leveraging EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine.
+This codebase serves as a concrete technical showcase of end-to-end engineering excellence across four critical domains:
+
+1. **Smart Contract Development (Solidity / EVM)**
+   - Custom error architectures for minimal gas consumption and expressive debugging.
+   - Strict Checks-Effects-Interactions (CEI) state patterns eliminating reentrancy attack vectors.
+   - Comprehensive OpenZeppelin integration (`ReentrancyGuard`, `Pausable`, `SafeERC20`, `Ownable`).
+   - Clean, auditable, and modular Solidity 0.8.20+ codebase with explicit NatSpec documentation.
+
+2. **Web3 Payments & Settlement Infrastructure**
+   - Non-custodial escrow architecture ensuring zero platform custody over user capital.
+   - Deterministic gross-fee surcharge accounting calculated atomically on deposit.
+   - Autonomous buyer refund fallbacks protecting capital against oracle downtime or merchant abandonment.
+   - Multi-chain deployment readiness across Layer-2 ecosystems (Arbitrum Sepolia, Base Sepolia).
+
+3. **Blockchain Security & Pre-Audit Verification**
+   - 12 explicit test-verified security invariants mapped directly to automated Hardhat test targets.
+   - Property-based fuzzing verifying state machine irreversibility and balance conservation.
+   - High-concurrency chaos simulation rejecting 100% of tested malicious vectors (replays, forged data, key leaks).
+   - Clear threat modeling separating on-chain guarantees from physical-world oracle assumptions.
+
+4. **Full-Stack Web3 & Systems Integration**
+   - Cryptographic EIP-712 structured voucher generation and ECDSA signature aggregation.
+   - High-performance asynchronous Python/FastAPI backend with SQLite WAL concurrency management.
+   - Seamless frontend Web3 wallet connection, token approvals, and deposit flows via Ethers.js.
+   - Simulated Web2 shipping carrier webhook ingestion bridging off-chain physical events with on-chain settlement.
+
+---
+
+## 📖 System Overview & Architecture Positioning
+
+This PoC demonstrates how decentralized e-commerce escrow can achieve cryptographically verified delivery settlement using EVM smart contracts, USDC stablecoins, EIP-712 structured vouchers, and a 2-of-3 threshold oracle verification engine without administrative fund custody.
 
 ```
 UNINITIALIZED
@@ -37,22 +82,22 @@ UNINITIALIZED
 ```
 
 > [!NOTE]
-> **Zero-Config Persistent Storage**: Off-chain order state, checkout sessions, anti-replay nonces, voucher deadlines, and EIP-712 threshold signatures are persistently managed via a local SQLite database (`decentralized_stripe.db` via `backend/database.py`). This guarantees state survival across FastAPI service restarts without requiring external database server dependencies.
+> **Zero-Config Persistent Storage & Production Scaling**: Off-chain order state, checkout sessions, anti-replay nonces, voucher deadlines, and EIP-712 threshold signatures are persistently managed via a local SQLite database (`harmonium_pay.db` via `backend/database.py`). This guarantees state survival across FastAPI service restarts without requiring external database server dependencies. For distributed, multi-container horizontal scaling in production, migrating to PostgreSQL (e.g. AWS RDS/Aurora) with connection pooling is required to avoid shared file-locking constraints.
 
 
 ### 🔒 Trust Model & Custodial Boundaries
 
 > [!IMPORTANT]
 > **Non-Custodial Escrow vs Oracle Attestation**:
-> - **Funds Custody (100% Non-Custodial)**: Zero admin custody. Neither the contract owner nor protocol operators can arbitrarily transfer, freeze, or confiscate escrowed funds (`Invariant 9`). Funds can ONLY move via valid 2-of-3 threshold oracle settlement or buyer action (`Invariant 3`, `Invariant 4`).
+> - **Funds Custody (Zero Admin Fund-Transfer Authority)**: The smart contract escrow fund path enforces zero administrative custody (`Invariant 9`). Neither the contract owner nor protocol operators possess functions to arbitrarily transfer, freeze, or confiscate escrowed balances. Escrowed funds can exclusively transition via verified 2-of-3 threshold oracle signatures or direct buyer actions (`Invariant 3`, `Invariant 4`).
 > - **Delivery Attestation (2-of-3 Threshold Trust Assumption)**: Automated release relies on Web2 carrier webhooks signed by a 2-of-3 threshold oracle quorum. The security model explicitly assumes **fewer than 2 out of 3 authorized oracle keys are compromised or colluding**.
 
 ```
 Funds Custody Boundary:
-  Funds → Smart Contract → Zero Administrator Custody (Non-Custodial)
+  Funds → Smart Contract → Zero Administrative Fund-Transfer Authority (Non-Custodial Logic)
 
 Delivery Attestation Boundary:
-  Delivery Event → 2-of-3 Oracle Quorum → Cryptographic Release Voucher (Trust Assumption)
+  Delivery Event (Carrier API) → 2-of-3 Oracle Quorum (HSM/KMS Keys) → Cryptographic Release Voucher (Trust Assumption)
 ```
 
 ### ⚠️ Trust Assumptions & System Limitations
@@ -60,7 +105,7 @@ Delivery Attestation Boundary:
 To ensure absolute technical transparency, this protocol explicitly defines its operational boundaries and assumptions:
 
 - **EVM & Smart Contract Integrity**: The escrow smart contract logic is assumed to be deployed immutably and compiled with standard EVM rules (`^0.8.20`).
-- **Standard Token Interface**: The underlying USDC/ERC-20 token contract is assumed to strictly conform to standard IERC20 transfer/balance interfaces.
+- **Standard Token Interface**: The underlying USDC/ERC-20 token contract is assumed to strictly conform to standard IERC20 transfer/balance interfaces. Non-standard tokens—specifically fee-on-transfer, rebasing, or deflationary tokens—are strictly unsupported as token fee deductions on transfer break the accounting balance invariant (`grossAmount = itemPrice + feeAmount`).
 - **Oracle Quorum Honesty**: At least 2 out of the 3 authorized oracle signing identities are assumed to remain uncompromised, non-colluding, and online.
 - **Physical-World Oracle Risk**: Carrier delivery APIs (e.g. UPS/FedEx webhooks) are external physical-world data providers; carrier API key compromises or falsified tracking statuses at the carrier level cannot be independently verified on-chain.
 - **Off-Chain Key Security**: Oracle private keys must be stored in secure HSMs/KMS modules; key storage security is an off-chain operational dependency.
@@ -100,9 +145,9 @@ To ensure absolute technical transparency, this protocol explicitly defines its 
 ## 🛠 Project Structure
 
 ```
-DECENTRALIZED-STRIPE/
+Harmonium/
 ├── contracts/
-│   ├── DecentralizedStripeEscrow.sol   # Non-custodial EIP-712 & 2-of-3 threshold escrow core contract
+│   ├── HarmoniumPayEscrow.sol          # Non-custodial EIP-712 & 2-of-3 threshold escrow core contract
 │   └── MockUSDC.sol                    # ERC-20 Mock USDC for test environments
 ├── backend/
 │   ├── database.py                     # SQLite persistence layer & thread-safe CRUD interface
@@ -118,7 +163,9 @@ DECENTRALIZED-STRIPE/
 │   ├── deploy_testnet.js               # Testnet deployment & verification script
 │   └── simulate_flow.js                # End-to-end integration test runner
 ├── test/
-│   └── DecentralizedStripeEscrow.test.js # Hardhat unit test suite
+│   ├── HarmoniumPayEscrow.test.js      # Hardhat unit test suite
+│   ├── HarmoniumPayEscrow.fuzz.test.js # Hardhat property-based fuzz suite
+│   └── oracle_resilience.test.js       # Hardhat multi-oracle resilience suite
 ├── hardhat.config.js                   # Hardhat EVM compiler & network settings
 └── ARCHITECTURE.md                     # System design roadmap & non-custodial security specification
 ```
@@ -222,27 +269,36 @@ uvicorn backend.main:app --reload --port 8000
 
 ---
 
-## 🌐 Public Testnet Deployment & E2E Verification
+## 🌐 Public Testnet Deployment & E2E Verification Readiness
+ 
+Target testnet network configurations are pre-configured in `hardhat.config.js`:
+- **Arbitrum Sepolia** (Chain ID: `421614`, RPC: `ARBITRUM_SEPOLIA_RPC_URL`)
+- **Base Sepolia** (Chain ID: `84532`, RPC: `BASE_SEPOLIA_RPC_URL`)
 
-Supported network targets:
-- **Arbitrum Sepolia** (Chain ID: `421614`, Env: `ARBITRUM_SEPOLIA_RPC_URL`)
-- **Base Sepolia** (Chain ID: `84532`, Env: `BASE_SEPOLIA_RPC_URL`)
+> **Pre-Deployment Readiness Notice**: The codebase and deployment scripts are fully prepared for Arbitrum Sepolia and Base Sepolia. To perform a verifiable live deployment, ensure `.env` is populated with a funded testnet account `PRIVATE_KEY`, valid RPC URLs, and 3 distinct oracle addresses. Do not claim public testnet deployment status until transactions are mined on-chain and contracts are verified on Arbiscan / Basescan.
 
-### Deploy Command
+### Deploy Commands
 ```bash
+# Arbitrum Sepolia
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --network arbitrumSepolia
+
+# Base Sepolia
 HARDHAT_DISABLE_TELEMETRY=true npx hardhat run scripts/deploy_testnet.js --network baseSepolia
 ```
 
-### Verification Command
+### Verification Commands
 ```bash
+# Arbiscan (Arbitrum Sepolia)
 npx hardhat verify --network arbitrumSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "[\"<ORACLE1>\",\"<ORACLE2>\",\"<ORACLE3>\"]" "<FEE_RECIPIENT>"
+
+# Basescan (Base Sepolia)
+npx hardhat verify --network baseSepolia <ESCROW_ADDRESS> "<USDC_ADDRESS>" "[\"<ORACLE1>\",\"<ORACLE2>\",\"<ORACLE3>\"]" "<FEE_RECIPIENT>"
 ```
 
 ## 📊 Pre-Audit Benchmarks & Stress Tests
 
-Comprehensive multi-agent concurrency and chaos testing metrics (100 agents, 421 transactions, 100% attack rejection rate, gas consumption profiles) are archived in:
-- 📄 [Pre-Audit Benchmark & Stress Test Report (docs/benchmarks/SIMULATION_REPORT.md)](file:///home/ssr/Desktop/DECENTRALIZED-STRIPE/docs/benchmarks/SIMULATION_REPORT.md)
+Comprehensive enterprise multi-agent concurrency and chaos testing metrics (5,000 agents, 12,250 transactions mined, 100% attack rejection rate, gas consumption profiles) are archived in:
+- 📄 [Pre-Audit Benchmark & Stress Test Report (docs/benchmarks/SIMULATION_REPORT.md)](docs/benchmarks/SIMULATION_REPORT.md)
 
 ### Running Multi-Agent Stress Simulation:
 ```bash

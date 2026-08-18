@@ -64,7 +64,7 @@ async function main() {
   const usdc = await MockUSDC.deploy();
   await usdc.deployed();
 
-  const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+  const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
   const escrow = await Escrow.deploy(
     usdc.address,
     oracles.map((o) => o.address),
@@ -72,8 +72,8 @@ async function main() {
   );
   await escrow.deployed();
 
-  console.log(`[DEPLOY] MockUSDC:                  ${usdc.address}`);
-  console.log(`[DEPLOY] DecentralizedStripeEscrow: ${escrow.address}`);
+  console.log(`[DEPLOY] MockUSDC:           ${usdc.address}`);
+  console.log(`[DEPLOY] HarmoniumPayEscrow: ${escrow.address}`);
 
   // 3. Generate Agent Pools
   const buyers = [];
@@ -127,7 +127,7 @@ async function main() {
 
   // EIP-712 Domain
   const domain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: network.chainId,
     verifyingContract: escrow.address

@@ -2,7 +2,8 @@ import os
 import time
 import random
 from typing import Optional, List
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from web3 import Web3
@@ -11,11 +12,24 @@ from backend.database import init_db, save_order, get_order_by_session_id, get_o
 
 WEB3_PROVIDER_URL = os.getenv("WEB3_PROVIDER_URL", "")
 
-app = FastAPI(title="Decentralized Stripe 2-of-3 Threshold Oracle Network Service", version="1.0.0")
+app = FastAPI(title="Harmonium Pay 2-of-3 Threshold Oracle Network Service", version="1.0.0")
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": exc.detail}
+        )
+    return JSONResponse(
+        status_code=500,
+        content={"error": "Internal server error occurred. Please contact support."}
+    )
 
 @app.on_event("startup")
 def on_startup():
     init_db()
+
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:8000,http://127.0.0.1:8000,http://127.0.0.1:3000").split(",")
 
@@ -55,7 +69,7 @@ class AttestationRequest(BaseModel):
 def read_root():
     return {
         "status": "online",
-        "service": "Decentralized Stripe 2-of-3 Threshold Oracle Network Service",
+        "service": "Harmonium Pay 2-of-3 Threshold Oracle Network Service",
         "active_oracle_nodes_count": len(ORACLE_NODES),
         "node_addresses": [node.address for node in ORACLE_NODES],
         "threshold_required": 2

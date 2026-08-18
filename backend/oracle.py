@@ -4,6 +4,17 @@ from eth_account import Account
 from eth_abi import encode
 from web3 import Web3
 
+# ==============================================================================
+# DETERMINISTIC TEST/DEMO FIXTURE
+# ------------------------------------------------------------------------------
+# MOCK_SHIPPING_DB and verify_carrier_status provide reproducible test/demo data
+# for local evaluation and cryptographic threshold signing verification.
+#
+# PRODUCTION REQUIREMENT:
+# In a production environment, this mock fixture MUST be replaced by authenticated,
+# TLS-verified carrier webhooks/REST APIs (e.g. FedEx, UPS, DHL, Canada Post)
+# featuring HMAC request validation and rate limiting.
+# ==============================================================================
 MOCK_SHIPPING_DB = {
     "TRACK123": {"status": "DELIVERED", "carrier": "UPS"},
     "TRACK456": {"status": "IN_TRANSIT", "carrier": "CANADA_POST"},
@@ -11,6 +22,8 @@ MOCK_SHIPPING_DB = {
 }
 
 def verify_carrier_status(tracking_id: str) -> dict:
+    """Deterministic test fixture querying mock shipping statuses.
+    Production systems must interface with live authenticated carrier APIs."""
     return MOCK_SHIPPING_DB.get(tracking_id, {"status": "NOT_FOUND", "carrier": "UNKNOWN"})
 
 def compute_tracking_hash(carrier_id: str, tracking_number: str) -> str:
@@ -98,7 +111,7 @@ class OracleSignerNode:
         voucher_deadline: int
     ) -> dict:
         domain_data = {
-            "name": "DecentralizedStripeEscrow",
+            "name": "HarmoniumPayEscrow",
             "version": "1",
             "chainId": chain_id,
             "verifyingContract": Web3.to_checksum_address(contract_address)

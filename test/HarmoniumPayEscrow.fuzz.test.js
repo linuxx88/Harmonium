@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DecentralizedStripeEscrow - Property-Based & Fuzz Testing", function () {
+describe("HarmoniumPayEscrow - Property-Based & Fuzz Testing", function () {
   let mockUSDC, escrow;
   let owner, buyer, seller, oracle1, oracle2, oracle3, feeRecipient, attacker;
 
@@ -13,7 +13,7 @@ describe("DecentralizedStripeEscrow - Property-Based & Fuzz Testing", function (
   async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, grossAmount, itemPrice, carrierId, trackingHash, nonce, voucherDeadline) {
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const domain = {
-      name: "DecentralizedStripeEscrow",
+      name: "HarmoniumPayEscrow",
       version: "1",
       chainId: chainId,
       verifyingContract: escrow.address
@@ -57,7 +57,7 @@ describe("DecentralizedStripeEscrow - Property-Based & Fuzz Testing", function (
     mockUSDC = await MockUSDC.deploy();
     await mockUSDC.deployed();
 
-    const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+    const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
     escrow = await Escrow.deploy(
       mockUSDC.address,
       [oracle1.address, oracle2.address, oracle3.address],
@@ -218,7 +218,7 @@ describe("DecentralizedStripeEscrow - Property-Based & Fuzz Testing", function (
           await escrow.settleWithOracle(orderId, grossAmount, itemPrice, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, sigPair);
           expect.fail("Expected settlement with invalid signatures to revert");
         } catch (err) {
-          expect(err.message).to.satisfy(msg => msg.includes("InvalidSignature") || msg.includes("DuplicateSignature"));
+          expect(err.message).to.satisfy(msg => msg.includes("InvalidQuorum") || msg.includes("InvalidSignature") || msg.includes("DuplicateSignature"));
         }
       }
     });
@@ -233,11 +233,11 @@ describe("DecentralizedStripeEscrow - Property-Based & Fuzz Testing", function (
       const initialAdminBal = await mockUSDC.balanceOf(owner.address);
       const initialEscrowBal = await mockUSDC.balanceOf(escrow.address);
 
-      // Fuzz admin actions: pause/unpause, setFeeRecipient, setOracleSigners
+      // Fuzz admin actions: pause/unpause, setFeeRecipient, proposeOracleSigners
       await escrow.connect(owner).pause();
       await escrow.connect(owner).unpause();
       await escrow.connect(owner).setFeeRecipient(owner.address);
-      await escrow.connect(owner).setOracleSigners([oracle1.address, oracle2.address, oracle3.address]);
+      await escrow.connect(owner).proposeOracleSigners([oracle1.address, oracle2.address, oracle3.address]);
 
       const finalAdminBal = await mockUSDC.balanceOf(owner.address);
       const finalEscrowBal = await mockUSDC.balanceOf(escrow.address);

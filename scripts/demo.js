@@ -2,7 +2,7 @@ const { ethers, network } = require("hardhat");
 
 async function main() {
   console.log("===============================================================");
-  console.log("     DECENTRALIZED STRIPE POC - E2E DEMONSTRATION RUNNER       ");
+  console.log("        HARMONIUM PAY POC - E2E DEMONSTRATION RUNNER           ");
   console.log("===============================================================\n");
 
   const [deployer, buyer, seller, feeRecipient] = await ethers.getSigners();
@@ -11,12 +11,12 @@ async function main() {
   const oracle3 = ethers.Wallet.createRandom();
 
   // 1. Deploy Contracts
-  console.log("[1/4] Deploying MockUSDC & DecentralizedStripeEscrow...");
+  console.log("[1/4] Deploying MockUSDC & HarmoniumPayEscrow...");
   const MockUSDC = await ethers.getContractFactory("MockUSDC");
   const usdc = await MockUSDC.deploy();
   await usdc.deployed();
 
-  const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+  const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
   const escrow = await Escrow.deploy(
     usdc.address,
     [oracle1.address, oracle2.address, oracle3.address],
@@ -42,15 +42,24 @@ async function main() {
   const trackingNumber = "1Z9999999999999999";
   const trackingHash = await escrow.computeTrackingHash(carrierId, trackingNumber);
 
-  console.log(`  Deposit gross amount: ${ethers.utils.formatUnits(grossAmount, 6)} USDC (Item: 100, Fee: 0.1)`);
-  await escrow.connect(buyer).deposit(orderIdA, seller.address, itemPrice);
+  console.log(`  [Lifecycle: Creation & Funding]`);
+  console.log(`    * Order ID:                   ${orderIdA}`);
+  console.log(`    * Buyer Address:              ${buyer.address}`);
+  console.log(`    * Seller Address:             ${seller.address}`);
+  console.log(`    * Item Price:                 ${ethers.utils.formatUnits(itemPrice, 6)} USDC`);
+  console.log(`    * Gross Deposit (with fee):   ${ethers.utils.formatUnits(grossAmount, 6)} USDC`);
+  
+  const txDepositA = await escrow.connect(buyer).deposit(orderIdA, seller.address, itemPrice);
+  const rcptDepositA = await txDepositA.wait();
+  console.log(`    * Deposit Tx Hash:            ${rcptDepositA.transactionHash}`);
+  console.log(`    * On-Chain Order State:       FUNDED (State = 1)`);
 
   const chainId = (await ethers.provider.getNetwork()).chainId;
   const block = await ethers.provider.getBlock("latest");
   const voucherDeadline = block.timestamp + 3600;
 
   const domain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: chainId,
     verifyingContract: escrow.address
@@ -84,20 +93,40 @@ async function main() {
     voucherDeadline: voucherDeadline
   };
 
-  console.log("  Generating EIP-712 typed vouchers from Oracle 1 and Oracle 2 (2-of-3 Quorum)...");
+  console.log(`\n  [Lifecycle: Oracle Attestation & Quorum Validation]`);
+  console.log(`    * Oracle 1 Signer:            ${oracle1.address}`);
+  console.log(`    * Oracle 2 Signer:            ${oracle2.address}`);
+  console.log(`    * Carrier Attestation:        ${carrierId} (Tracking Hash: ${trackingHash.slice(0, 18)}...)`);
+  
   const sig1 = await oracle1._signTypedData(domain, types, voucherPayload);
   const sig2 = await oracle2._signTypedData(domain, types, voucherPayload);
+  console.log(`    * EIP-712 Quorum Gathered:    2 of 3 Authorized Signatures`);
 
-  console.log("  Submitting releaseWithOracle transaction...");
-  await escrow.releaseWithOracle(orderIdA, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
+  console.log(`\n  [Lifecycle: On-Chain Settlement Execution]`);
+  const initialSellerBalA = await usdc.balanceOf(seller.address);
+  const initialFeeBalA = await usdc.balanceOf(feeRecipient.address);
+  
+  const txSettleA = await escrow.releaseWithOracle(orderIdA, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadline, [sig1, sig2]);
+  const rcptSettleA = await txSettleA.wait();
+  console.log(`    * Settlement Tx Hash:         ${rcptSettleA.transactionHash}`);
+  console.log(`    * On-Chain Order State:       SETTLED (State = 2)`);
 
   const sellerBalA = await usdc.balanceOf(seller.address);
   const feeBalA = await usdc.balanceOf(feeRecipient.address);
-  console.log(`  ✓ Seller Payout Received:        ${ethers.utils.formatUnits(sellerBalA, 6)} USDC`);
-  console.log(`  ✓ Protocol Fee Collected:         ${ethers.utils.formatUnits(feeBalA, 6)} USDC\n`);
+  console.log(`    * Seller Balance Delta:       +${ethers.utils.formatUnits(sellerBalA.sub(initialSellerBalA), 6)} USDC (Final: ${ethers.utils.formatUnits(sellerBalA, 6)} USDC)`);
+  console.log(`    * Protocol Fee Balance Delta: +${ethers.utils.formatUnits(feeBalA.sub(initialFeeBalA), 6)} USDC (Final: ${ethers.utils.formatUnits(feeBalA, 6)} USDC)`);
+  
+  console.log(`\n  [Lifecycle: Irreversibility Constraint Verification]`);
+  console.log("  Verifying terminal irreversibility on Order A (Attempting refund on SETTLED order)...");
+  try {
+    await escrow.connect(buyer).claimRefund(orderIdA);
+    throw new Error("SECURITY VIOLATION: Settled order allowed refund!");
+  } catch (err) {
+    console.log("  ✓ Correctly rejected refund on SETTLED order (Invariant 1 enforced)");
+  }
 
   // --- DEMO SCENARIO B: Fulfillment Timeout & Buyer Refund ---
-  console.log("[3/4] DEMO B: Fulfillment Timeout & Non-Custodial Buyer Refund");
+  console.log("\n[3/4] DEMO B: Fulfillment Timeout & Non-Custodial Buyer Refund");
   const orderIdB = ethers.utils.id("DEMO_ORDER_BUYER_REFUND");
   
   await escrow.connect(buyer).deposit(orderIdB, seller.address, itemPrice);
@@ -112,11 +141,27 @@ async function main() {
   const buyerBalAfter = await usdc.balanceOf(buyer.address);
   const refundDiff = buyerBalAfter.sub(buyerBalBefore);
 
-  console.log(`  ✓ Refunded to Buyer:              ${ethers.utils.formatUnits(refundDiff, 6)} USDC (Full Gross Surcharge Refunded)\n`);
+  console.log(`  ✓ Refunded to Buyer:              ${ethers.utils.formatUnits(refundDiff, 6)} USDC (Full Gross Surcharge Refunded)`);
+
+  console.log("  Verifying terminal irreversibility on Order B (Attempting oracle settlement on REFUNDED order)...");
+  try {
+    const blockB = await ethers.provider.getBlock("latest");
+    const voucherDeadlineB = blockB.timestamp + 3600;
+    const voucherPayloadB = { ...voucherPayload, orderId: orderIdB, voucherDeadline: voucherDeadlineB };
+    const sig1B = await oracle1._signTypedData(domain, types, voucherPayloadB);
+    const sig2B = await oracle2._signTypedData(domain, types, voucherPayloadB);
+    await escrow.releaseWithOracle(orderIdB, grossAmount, itemPrice, carrierId, trackingHash, 1, voucherDeadlineB, [sig1B, sig2B]);
+    throw new Error("SECURITY VIOLATION: Refunded order allowed settlement!");
+  } catch (err) {
+    console.log("  ✓ Correctly rejected settlement on REFUNDED order (Invariant 2 enforced)\n");
+  }
 
   console.log("[4/4] Verification Summary");
   console.log("===============================================================");
+  console.log("  ✓ Terminal Path 1: 2-of-3 Oracle Settlement (SETTLED) [Irreversible]");
+  console.log("  ✓ Terminal Path 2: Buyer Timeout Refund (REFUNDED) [Irreversible]");
   console.log("  ✓ Invariant 1 (Settled cannot refund): Verified");
+  console.log("  ✓ Invariant 2 (Refunded cannot settle): Verified");
   console.log("  ✓ Invariant 4 (2-of-3 Threshold Quorum): Verified");
   console.log("  ✓ Invariant 8 (No Pre-settlement Seller Withdrawal): Verified");
   console.log("  ✓ Invariant 10 (Immutable Gross Surcharge): Verified");

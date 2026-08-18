@@ -4,7 +4,7 @@
 > **DISCLAIMER**: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
 
 ## System Position & Summary
-**Decentralized Stripe PoC**: Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement.
+**Harmonium Pay PoC**: Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement.
 
 ## Security Model
 
@@ -22,54 +22,84 @@ UNINITIALIZED
     └── buyer confirmation ────────────────> SETTLED
 ```
 
-### Formal Threat Model & Oracle Boundary Conditions
-> **Threat Model Statement**: The system does not eliminate oracle risk; it elevates the compromise threshold to N >= 2.
->
-> **Boundary Conditions**:
-> - **1 compromised oracle**: Settlement remains cryptographically protected (Security assumption HOLDS).
-> - **2 compromised oracles**: Threshold broken, unauthorized settlement becomes possible (Security assumption FAILS).
+### 1. On-Chain Guarantees (EVM Execution Boundary)
+- **Zero Administrative Fund-Transfer Authority**: No owner/admin function exists to confiscate, divert, or withdraw locked escrow funds (`Invariant 9`).
+- **Terminal State Irreversibility**: Orders in `SETTLED` or `REFUNDED` states can never transition to any other state (`Invariants 1 & 2`).
+- **Strict Accounting Conservation**: Escrow balance exactly equals the sum of gross amounts for active `FUNDED` orders.
+- **Cryptographic Replay Resistance**: EIP-712 domain separation binds `chainId`, `verifyingContract`, and per-order nonces (`Invariants 5, 6, 7`).
+- **Fail-Safe Buyer Redundancy**: If oracles are offline or fail to sign, the buyer can voluntarily release funds via `confirmReceiptByBuyer` (`Invariant 4`), or claim full refund via `claimRefund` once `fulfillmentDeadline` elapses (`Invariant 3`).
 
-### Trusted
-- EVM Consensus / Layer-2 Execution
-- Official USDC ERC-20 Contract
-- OpenZeppelin Audit-Tested Primitives
-- Secp256k1 ECDSA & EIP-712 Cryptographic Standards
+### 2. Oracle Trust Assumptions
+- **2-of-3 Quorum Threshold**: Automated settlement strictly mandates valid cryptographic attestations from $\ge 2$ distinct authorized oracle keys.
+- **Threshold Honesty Model**: The security boundary assumes that **fewer than 2 out of 3 authorized oracle keys are compromised or colluding**. A single compromised key cannot trigger settlement.
 
-### Assumed Honest
-- 2-of-3 Threshold Oracle Quorum: settlement requires signatures from two distinct authorized oracle identities. The security model assumes fewer than two authorized oracle keys are compromised or colluding.
-- Shipping carrier tracking APIs (Canada Post / UPS)
+### 3. Carrier-Data Assumptions (Physical-World Grounding)
+- **External Web2 Grounding**: Automated attestation relies on external shipping carrier tracking APIs (e.g. UPS, FedEx, Canada Post).
+- **Physical-World Data Boundary**: The smart contract cannot independently verify physical parcel contents. The security model assumes that carrier status updates genuinely reflect physical transit and delivery.
 
-### Not Trusted
-- Buyer
-- Seller
-- Frontend UI
-- Backend API Server
-- Contract Administrator / Owner
+### 4. Off-Chain Key-Management Assumptions
+- **Signer Identity Isolation**: In a production setting, oracle private keys must be stored in secure HSMs or cloud KMS enclaves (AWS KMS, GCP KMS, Vault Transit) with hardware-enforced access policies.
+- **Signer Nonce & Timestamp Integrity**: Oracle services are assumed to generate monotonic nonces and valid EIP-712 expiration timestamps (`voucherDeadline`).
 
-## Explicit 11 Security Invariants
-1. **Invariant 1**: A settled order can never be refunded (`SETTLED` -> `REFUNDED` is strictly forbidden).
-2. **Invariant 2**: A refunded order can never be settled (`REFUNDED` -> `SETTLED` is strictly forbidden).
-3. **Invariant 3**: Only the buyer can trigger a refund (`claimRefund` restricts caller to `order.buyer`).
-4. **Invariant 4**: Settlement can occur via EITHER (2-of-3 Oracle Quorum threshold release) OR (Direct Voluntary Buyer Confirmation via `confirmReceiptByBuyer`).
-5. **Invariant 5**: A settlement voucher nonce is scoped per order (`usedNonces[orderId][nonce]`) and can only be used once to prevent cross-order/intra-order replay attacks.
-6. **Invariant 6**: A voucher cannot be replayed on another chain (`chainId` enforced in EIP-712 domain separator).
-7. **Invariant 7**: A voucher cannot be replayed on another escrow contract (`verifyingContract` address enforced in EIP-712 domain separator).
-8. **Invariant 8**: The seller can never withdraw funds before settlement (funds locked in contract until valid settlement state transition).
-9. **Invariant 9**: For every escrowed order in state `FUNDED`, no administrative/privileged caller (contract owner, multisig, or operator) can trigger a buyer refund, seller settlement, protocol fee withdrawal, or arbitrary token transfer without satisfying the exact same state, signature (2-of-3 oracle), or deadline requirements enforced on non-privileged actors.
-10. **Invariant 10**: Protocol fee can only be paid according to the order's immutable fee parameters (`feeAmount = itemPrice * PROTOCOL_FEE_BPS / BPS_DENOMINATOR`). Order fee parameters (`protocolFeeRecipient`, `feeAmount`, `itemPrice`, `grossAmount`) are strictly immutable once the order is funded. Neither contract owner nor any future admin can alter the `protocolFeeRecipient` or `feeAmount` of an existing `FUNDED` order.
-11. **Invariant 11**: A settlement voucher is valid ONLY for the exact order parameters stored on-chain (orderId, buyer, seller, token, amount, carrierId, trackingHash, nonce, voucherDeadline).
-12. **Invariant 12**: Functions `confirmReceiptByBuyer` and `settleWithOracle` (`releaseWithOracle`) strictly enforce the Checks-Effects-Interactions (CEI) pattern: caller and status checks occur first, state mutation to `SETTLED` occurs before any external token transfers.
+### 5. PoC Infrastructure Limitations
+- **In-Process Key Simulation**: In this local PoC, the 3 oracle signing identities run within `backend/oracle.py` on a single process. This simulates cryptographic verification and quorum logic but **does not provide physical or infrastructure isolation**.
+- **Mock Shipping Fixture**: Carrier status queries use `MOCK_SHIPPING_DB` and `verify_carrier_status` rather than live authenticated carrier WebSockets/Webhooks.
+- **Unaudited Status**: This codebase is an unaudited Proof of Concept and must not be used with production funds.
+
+### Actor Trust Taxonomy
+- **Trusted**: EVM Consensus / L2 Execution, USDC Token Contract, OpenZeppelin Primitives, Secp256k1 ECDSA / EIP-712 Standards.
+- **Assumed Honest**: 2-of-3 Oracle Quorum ($\le 1$ compromised key), Carrier API feeds.
+- **Untrusted / Adversarial**: Buyer, Seller, Frontend UI, Backend Web Server, Contract Deployer / Owner.
+
+### Threat Model & Mitigation Matrix
+
+| Attacker Capability | Targeted Component | Expected Security Boundary | Mitigation Strategy | Corresponding Test Target |
+| :--- | :--- | :--- | :--- | :--- |
+| **Compromised Oracle Key (1-of-3)** | Settlement Attestation (`settleWithOracle`) | Single corrupted signature cannot trigger fund release | 2-of-3 Threshold Quorum with strict `signer0 != signer1` check | `test_invalid_quorum_rejection` / `Scenario 3` |
+| **Forged Price / Amount Payload** | Release Voucher Parameter Verification | Signed voucher with modified amount cannot extract escrow funds | Strict on-chain parameter validation matching stored order state | `test_voucher_parameter_mismatch` |
+| **Signature & Nonce Replay** | Settlement Execution | Settled voucher cannot be re-executed on current or other orders | State transition to `SETTLED` + per-order mapped nonces (`usedNonces`) | `test_settled_order_cannot_settle_replay` |
+| **Cross-Chain / Cross-Contract Replay** | EIP-712 Signature Domain | Voucher from Testnet/Fork cannot be submitted on Mainnet/other contract | EIP-712 domain separator binding `chainId` & `verifyingContract` | `test_voucher_domain_chain_separation` |
+| **Malicious Contract Owner / Admin** | Fund Custody & State Transitions | Admin cannot unilaterally confiscate or divert escrowed deposits | Zero administrative fund-transfer functions (`Invariant 9`) | `test_admin_has_no_fund_transfer_authority` |
+| **Fulfillment Timeout Race Condition** | Settlement vs Refund Race | Late settlement cannot reverse buyer refund and vice versa | First mined transaction establishes irreversible terminal state | `test_deterministic_settlement_vs_refund_race` |
+| **Protocol Emergency Halt** | Circuit Breaker (`Pausable`) | Paused contract blocks new orders but does not lock user funds | `claimRefund` explicitly overrides pause check (`whenNotPaused` omitted) | `test_refund_accessible_when_paused` |
+
+## Explicit 12 Security Invariants & Test Verification Matrix
+
+| ID | Invariant Name | Rule Description | Hardhat Test Target | Verification Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **INV-1** | Settled cannot refund | Settled order can never be refunded (`SETTLED` -> `REFUNDED` forbidden) | `test_settled_order_cannot_be_refunded` | `PASSED` |
+| **INV-2** | Refunded cannot settle | Refunded order can never be settled (`REFUNDED` -> `SETTLED` forbidden) | `test_refunded_order_cannot_settle` | `PASSED` |
+| **INV-3** | Buyer-only refund | Only buyer can trigger `claimRefund` (`claimRefund` restricts caller) | `test_only_buyer_can_claim_refund` | `PASSED` |
+| **INV-4** | Settlement quorum | 2-of-3 Oracle sigs OR direct buyer confirm (`confirmReceiptByBuyer`) | `test_settlement_quorum_or_buyer_only` | `PASSED` |
+| **INV-5** | Cross-order replay protection | Nonces strictly scoped per order (`usedNonces[orderId][nonce]`) | `test_voucher_cannot_cross_orders` | `PASSED` |
+| **INV-6** | Cross-chain domain isolation | EIP-712 locked to `chainId` in domain separator | `test_voucher_domain_chain_separation` | `PASSED` |
+| **INV-7** | Cross-contract domain isolation | EIP-712 locked to `verifyingContract` in domain separator | `test_voucher_verifying_contract_isolation` | `PASSED` |
+| **INV-8** | No pre-settlement seller withdraw | Seller cannot withdraw funds pre-settlement | `test_seller_cannot_withdraw_pre_settlement` | `PASSED` |
+| **INV-9** | Zero admin fund authority | Admin cannot transfer/confiscate funds without oracle/buyer | `test_admin_has_no_fund_transfer_authority` | `PASSED` |
+| **INV-10** | Fee immutability | Gross amount = itemPrice + feeAmount immutable on funding | `test_fee_parameters_are_immutable` | `PASSED` |
+| **INV-11** | Exact parameter binding | Vouchers bind exact on-chain order fields | `test_voucher_must_match_order_parameters` | `PASSED` |
+| **INV-12** | Circuit breaker override | `claimRefund` remains accessible when contract paused | `test_refund_accessible_when_paused` | `PASSED` |
 
 ## Cryptographic & Deadline Specifications
 - **Cryptographic Domain Separation**: `chainId` and `verifyingContract` are bound strictly via the EIP-712 domain separator, blocking cross-chain and cross-contract signature replays.
 - **Order Binding**: The release voucher payload explicitly binds `orderId`, `buyer`, `seller`, `token`, `grossAmount`, `itemPrice`, `carrierId`, `trackingHash`, `nonce`, and `voucherDeadline` to guarantee attestations are valid strictly for the intended on-chain order parameters.
 - **Replay Protection**: Replays are strictly prevented via nonces scoped per order and stored directly in mapped state (`usedNonces[orderId][nonce] = true`).
-- **Decoupled Deadlines**: `fulfillmentDeadline` (order-level expiration for buyer refunds, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 cryptographic signature validity window).
-- **Explicit Carrier Data**: Struct includes `carrierId` and `trackingHash` directly inside EIP-712 typed voucher (`ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 grossAmount,uint256 itemPrice,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)`).
-- **Oracle Signer Extraction & Unique Identity Verification**:
+- **Decoupled Deadlines & Expiration Behavior**:
+  - `fulfillmentDeadline` (order-level expiration for buyer refunds, e.g., T + 7 days) vs `voucherDeadline` (EIP-712 cryptographic signature validity window).
+  - **Voucher Exceeding Fulfillment Deadline**: If an oracle generates a `voucherDeadline > fulfillmentDeadline`, the voucher cannot bypass the hard order deadline on-chain. If presented after `fulfillmentDeadline`, settlement reverts with `SettlementDeadlinePassed()` regardless of remaining voucher validity, and the buyer's refund rights via `claimRefund()` take absolute priority. Settlement requires `block.timestamp <= min(voucherDeadline, order.fulfillmentDeadline)`.
+- **Explicit Carrier Data & EIP-712 TypeHash Specification**:
+  - Struct TypeHash:
+    ```solidity
+    bytes32 public constant RELEASE_VOUCHER_TYPEHASH = keccak256(
+        "ReleaseVoucher(bytes32 orderId,address buyer,address seller,address token,uint256 grossAmount,uint256 itemPrice,string carrierId,bytes32 trackingHash,uint256 nonce,uint256 voucherDeadline)"
+    );
+    ```
+  - **Dynamic Type Encoding Rule**: In strict compliance with the EIP-712 standard, dynamic types (such as `string carrierId`) are encoded in the `structHash` as `keccak256(bytes(carrierId))` within `abi.encode(...)` before computing `_hashTypedDataV4(structHash)`.
+- **Oracle Signer Extraction & Strict Ordered Uniqueness**:
   - `signer0 = ECDSA.recover(digest, signatures[0])`
   - `signer1 = ECDSA.recover(digest, signatures[1])`
   - Strict validation: `signer0 != signer1` (distinct oracle identities required) and `isOracleSigner[signer0] && isOracleSigner[signer1]` (both signers must be authorized oracle identities).
+  - **Canonical Ordering Enforcement**: For multi-signature quorum verification over iterated arrays or pairs, requiring strictly ascending signer address order (`signer0 < signer1`) prevents array permutation malleability (e.g. `[sigA, sigB]` vs `[sigB, sigA]`) and guarantees a single canonical representation per settlement call.
 - **Accounting Validation Checks**:
   - `voucher.grossAmount == order.grossAmount`
   - `voucher.itemPrice == order.itemPrice`
@@ -87,6 +117,7 @@ To maintain strict compliance with **Invariant 9** (*No privileged account can a
    - **Yes.** In an emergency incident response scenario where 1 or 2 oracle private keys are compromised, the admin can invoke `setOracleSigners` to revoke the compromised addresses and register new secure oracle public keys.
 4. **Can oracle rotation invalidate existing vouchers?**
    - **Yes.** Any outstanding EIP-712 vouchers signed by revoked oracle keys become instantly invalid (`isOracleSigner[signer] == false` causing `InvalidSignature` revert).
+   - **Operational Impact on Merchants**: If all 3 keys (or 2 out of 3) are rotated simultaneously, merchants holding unsubmitted valid vouchers will see their settlement transactions revert. To settle, merchants must request the newly provisioned oracle quorum to re-sign and reissue a fresh EIP-712 release voucher matching the order parameters.
 5. **Non-Custodial Safeguard Guarantee (Invariant 9 Integrity)**:
    - Admin rotation of oracle signers does **NOT** grant the admin custody or transfer rights over escrowed funds.
    - To settle an order after rotation, the admin must control at least 2 valid, active oracle private keys *AND* generate a cryptographically valid EIP-712 `ReleaseVoucher` matching the exact on-chain order parameters.
@@ -121,16 +152,24 @@ To maintain strict compliance with **Invariant 9** (*No privileged account can a
 - `POST /api/v1/order/{order_id}/attestation` -> Submit delivery attestation request & generate EIP-712 release voucher.
 
 ## Off-Chain State Persistence Layer
-- **Storage Engine**: Zero-config local SQLite3 database (`backend/decentralized_stripe.db`).
+- **Storage Engine**: Zero-config local SQLite3 database (`backend/harmonium_pay.db`).
 - **Managed Entity (`orders` table)**: Persists `order_id`, `session_id`, `buyer`, `seller`, `item_price`, `gross_amount`, `token`, `contract_address`, `chain_id`, `tracking_id`, `status`, `nonce`, `voucher_deadline`, `signatures` (JSON list), and `created_at`.
 - **Lifecycle Integration**: Initialized via `init_db()` on FastAPI `startup` lifecycle event (`on_startup` in `backend/main.py`).
 - **Security & Reliability**: Thread-safe connection factory (`get_db_connection()`), SQL parameterization (`?`) preventing SQL injection vulnerabilities, and complete state recovery across server restarts.
+- **Horizontal Scaling & Production Topology**: While SQLite (in WAL mode) provides zero-config simplicity for PoC and single-node instances, it does not support multi-instance distributed deployments due to file-locking constraints across multiple API containers. Production high-availability (HA) topologies require migrating the persistence layer to PostgreSQL / AWS Aurora with a connection pooler (e.g. PgBouncer).
 
 ## System Components
 - **Smart Contracts (EVM)**: Hardened ERC-20 Escrow with EIP-712 structured signatures, 2-of-3 threshold oracle verification, buyer fee surcharge model, per-order anti-replay nonces, explicit gross surcharge accounting, and zero discretionary admin overrides.
-- **Backend (FastAPI + web3.py + SQLite)**: Multi-node oracle engine monitoring on-chain events, shipping carrier APIs, managing persistent order state via SQLite (`backend/database.py`), and generating cryptographic EIP-712 release vouchers signed by distinct oracle nodes (`ORACLE1_PRIVATE_KEY`, `ORACLE2_PRIVATE_KEY`, `ORACLE3_PRIVATE_KEY`).
+- **Backend (FastAPI + web3.py + SQLite / PostgreSQL)**: Multi-node oracle engine monitoring on-chain events, shipping carrier APIs, managing persistent order state, and coordinating cryptographic EIP-712 release vouchers.
 - **Frontend (Vanilla HTML/JS)**: Embeddable checkout widget interacting with EVM wallets and backend oracle endpoints.
 - **Scripts**: Automated testnet deployment (`deploy_testnet.js`), E2E flow simulation (`simulate_flow.js`), and security chaos test suite (`chaos_test.js`).
+
+## 🛡️ Target Production Multi-Oracle Quorum Architecture
+For mainnet production deployment, the single-process PoC oracle simulator transitions into a fully distributed, fault-isolated architecture:
+1. **3 Autonomous Microservices**: Each oracle node runs in a dedicated VPC/cluster with separate network boundaries, distinct cloud accounts, and independent operator credentials.
+2. **Dedicated Cloud HSM / KMS Keys**: Oracle private keys are never exposed in environment variables or application memory; all EIP-712 signing operations are executed inside FIPS 140-2 Level 3 compliant Hardware Security Modules (e.g., AWS CloudHSM, Google Cloud KMS, or HashiCorp Vault Transit engine).
+3. **Independent Carrier API Ingestion**: Each oracle service independently queries and parses authenticated carrier endpoints (FedEx/UPS/DHL webhooks and REST APIs) with distinct API credentials.
+4. **Quorum Aggregation Gateway**: A lightweight, non-custodial relayer aggregates signatures from at least 2 distinct, verified nodes to construct the final 2-of-3 release voucher payload for the merchant/buyer.
 
 
 

@@ -10,13 +10,14 @@ import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 
 /**
- * @title DecentralizedStripeEscrow
+ * @title HarmoniumPayEscrow
  * @notice Non-custodial, permissionless e-commerce escrow with cryptographically verified delivery settlement.
  * @dev Hardened with EIP-712 structured vouchers, 2-of-3 threshold oracle verification, buyer-paid fee surcharges, and per-order anti-replay nonces.
+ * @dev Note: Assumes strictly standard IERC20 tokens (e.g. standard USDC). Tokens with fee-on-transfer, rebasing, or deflationary mechanics are unsupported as they violate gross amount accounting invariants.
  * 
  * DISCLAIMER: This repository is a security-focused PoC and has not been audited. It must not be used with production funds.
  */
-contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712 {
+contract HarmoniumPayEscrow is ReentrancyGuard, Pausable, Ownable, EIP712 {
     using SafeERC20 for IERC20;
     using ECDSA for bytes32;
 
@@ -46,8 +47,13 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     uint256 public constant DEFAULT_TIMEOUT = 7 days;
     uint256 public constant THRESHOLD = 2;
 
+    uint256 public constant MIN_ITEM_PRICE = 1000;
+    uint256 public constant ORACLE_UPDATE_TIMELOCK = 2 days;
+
     address[] public oracleSigners;
     mapping(address => bool) public isOracleSigner;
+    address[] public pendingOracleSigners;
+    uint256 public oracleUpdateEta;
 
     mapping(bytes32 => EscrowOrder) public orders;
     // Per-order settlement nonce anti-replay mapping: orderId => nonce => used
@@ -64,6 +70,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     );
     event PaymentSettled(bytes32 indexed orderId, address indexed seller, uint256 itemPrice, uint256 feeAmount);
     event BuyerRefunded(bytes32 indexed orderId, address indexed buyer, uint256 amountRefunded);
+    event OracleSignersProposed(address[] pendingSigners, uint256 eta);
     event OracleSignersUpdated(address[] newSigners);
     event FeeRecipientUpdated(address indexed newFeeRecipient);
 
@@ -75,17 +82,21 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
     error Unauthorized();
     error InvalidSignature();
     error InvalidAddress();
+    error InvalidAmount();
+    error InvalidAccounting();
     error InvalidQuorum();
     error SignatureExpired();
     error DuplicateSignature();
     error SettlementDeadlinePassed();
     error NonceAlreadyUsed();
+    error TimelockNotExpired();
+    error NoPendingUpdate();
 
     constructor(
         address _usdcToken,
         address[] memory _oracleSigners,
         address _feeRecipient
-    ) Ownable(msg.sender) EIP712("DecentralizedStripeEscrow", "1") {
+    ) Ownable(msg.sender) EIP712("HarmoniumPayEscrow", "1") {
         if (_usdcToken == address(0) || _feeRecipient == address(0)) revert InvalidAddress();
         if (_oracleSigners.length < THRESHOLD) revert InvalidQuorum();
 
@@ -114,21 +125,38 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         emit FeeRecipientUpdated(_feeRecipient);
     }
 
-    function setOracleSigners(address[] calldata _newSigners) external onlyOwner {
+    function proposeOracleSigners(address[] calldata _newSigners) external onlyOwner {
         if (_newSigners.length < THRESHOLD) revert InvalidQuorum();
+
+        for (uint256 i = 0; i < _newSigners.length; i++) {
+            if (_newSigners[i] == address(0)) revert InvalidAddress();
+            for (uint256 j = 0; j < i; j++) {
+                if (_newSigners[i] == _newSigners[j]) revert DuplicateSignature();
+            }
+        }
+
+        pendingOracleSigners = _newSigners;
+        oracleUpdateEta = block.timestamp + ORACLE_UPDATE_TIMELOCK;
+        emit OracleSignersProposed(_newSigners, oracleUpdateEta);
+    }
+
+    function executeOracleSignersUpdate() external onlyOwner {
+        if (oracleUpdateEta == 0) revert NoPendingUpdate();
+        if (block.timestamp < oracleUpdateEta) revert TimelockNotExpired();
 
         for (uint256 i = 0; i < oracleSigners.length; i++) {
             isOracleSigner[oracleSigners[i]] = false;
         }
 
-        for (uint256 i = 0; i < _newSigners.length; i++) {
-            address signer = _newSigners[i];
-            if (signer == address(0) || isOracleSigner[signer]) revert InvalidAddress();
-            isOracleSigner[signer] = true;
+        for (uint256 i = 0; i < pendingOracleSigners.length; i++) {
+            isOracleSigner[pendingOracleSigners[i]] = true;
         }
 
-        oracleSigners = _newSigners;
-        emit OracleSignersUpdated(_newSigners);
+        oracleSigners = pendingOracleSigners;
+        delete pendingOracleSigners;
+        oracleUpdateEta = 0;
+
+        emit OracleSignersUpdated(oracleSigners);
     }
 
     /**
@@ -146,7 +174,8 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
      */
     function createAndFundOrder(bytes32 orderId, address seller, uint256 itemPrice) external whenNotPaused nonReentrant {
         if (orders[orderId].state != OrderState.UNINITIALIZED) revert OrderAlreadyExists();
-        if (seller == address(0) || itemPrice == 0) revert InvalidAddress();
+        if (seller == address(0)) revert InvalidAddress();
+        if (itemPrice < MIN_ITEM_PRICE) revert InvalidAmount();
 
         uint256 feeAmount = (itemPrice * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
         uint256 grossAmount = itemPrice + feeAmount;
@@ -174,7 +203,8 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
      */
     function deposit(bytes32 orderId, address seller, uint256 itemPrice) external whenNotPaused nonReentrant {
         if (orders[orderId].state != OrderState.UNINITIALIZED) revert OrderAlreadyExists();
-        if (seller == address(0) || itemPrice == 0) revert InvalidAddress();
+        if (seller == address(0)) revert InvalidAddress();
+        if (itemPrice < MIN_ITEM_PRICE) revert InvalidAmount();
 
         uint256 feeAmount = (itemPrice * PROTOCOL_FEE_BPS) / BPS_DENOMINATOR;
         uint256 grossAmount = itemPrice + feeAmount;
@@ -199,10 +229,6 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
 
     /**
      * @notice Releases escrow funds using 2-of-3 EIP-712 threshold signatures.
-     * @dev Validates signatures signature[0] and signature[1] with 2-of-3 Oracle Threshold rules.
-     */
-    /**
-     * @notice Releases escrow funds using 2-of-3 EIP-712 threshold signatures.
      * @dev Follows strict Checks-Effects-Interactions (CEI) pattern.
      */
     function releaseWithOracle(
@@ -221,8 +247,9 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         if (signatures.length < THRESHOLD) revert InvalidQuorum();
 
         // Strict accounting validation checks
-        if (grossAmount != order.grossAmount || itemPrice != order.itemPrice) revert InvalidAddress();
-        if (order.grossAmount != order.itemPrice + order.feeAmount) revert InvalidAddress();
+        if (grossAmount != order.grossAmount || itemPrice != order.itemPrice || order.grossAmount != order.itemPrice + order.feeAmount) {
+            revert InvalidAccounting();
+        }
 
         // Enforce per-order nonce uniqueness
         if (usedNonces[orderId][nonce]) revert NonceAlreadyUsed();
@@ -258,8 +285,9 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (signatures.length < THRESHOLD) revert InvalidQuorum();
 
-        if (grossAmount != order.grossAmount || itemPrice != order.itemPrice) revert InvalidAddress();
-        if (order.grossAmount != order.itemPrice + order.feeAmount) revert InvalidAddress();
+        if (grossAmount != order.grossAmount || itemPrice != order.itemPrice || order.grossAmount != order.itemPrice + order.feeAmount) {
+            revert InvalidAccounting();
+        }
 
         if (usedNonces[orderId][nonce]) revert NonceAlreadyUsed();
 
@@ -283,7 +311,6 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         uint256 voucherDeadline,
         bytes[] calldata signatures
     ) internal view {
-        // Step 1: EIP-712 Digest Computation using immutable order parameters
         bytes32 structHash = keccak256(
             abi.encode(
                 RELEASE_VOUCHER_TYPEHASH,
@@ -301,14 +328,34 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         );
 
         bytes32 digest = _hashTypedDataV4(structHash);
+        uint256 validSignaturesCount = 0;
+        address[] memory seenSigners = new address[](signatures.length);
 
-        // Step 2: Signer Address Extraction via ECDSA Recover
-        address signer0 = ECDSA.recover(digest, signatures[0]);
-        address signer1 = ECDSA.recover(digest, signatures[1]);
+        for (uint256 i = 0; i < signatures.length; i++) {
+            (address signer, ECDSA.RecoverError err, ) = ECDSA.tryRecover(digest, signatures[i]);
+            if (err != ECDSA.RecoverError.NoError || !isOracleSigner[signer]) {
+                continue;
+            }
 
-        // Step 3: Unique Identity & Authorized Oracle Validation
-        if (signer0 == signer1) revert DuplicateSignature();
-        if (!isOracleSigner[signer0] || !isOracleSigner[signer1]) revert InvalidSignature();
+            bool duplicate = false;
+            for (uint256 j = 0; j < validSignaturesCount; j++) {
+                if (seenSigners[j] == signer) {
+                    duplicate = true;
+                    break;
+                }
+            }
+
+            if (!duplicate) {
+                seenSigners[validSignaturesCount] = signer;
+                validSignaturesCount++;
+
+                if (validSignaturesCount >= THRESHOLD) {
+                    break;
+                }
+            }
+        }
+
+        if (validSignaturesCount < THRESHOLD) revert InvalidQuorum();
     }
 
     /**
@@ -333,7 +380,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
-        if (block.timestamp < order.fulfillmentDeadline) revert TimeoutNotReached();
+        if (block.timestamp <= order.fulfillmentDeadline) revert TimeoutNotReached();
 
         order.state = OrderState.REFUNDED;
         uint256 totalRefund = order.grossAmount;
@@ -349,7 +396,7 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         EscrowOrder storage order = orders[orderId];
         if (order.state != OrderState.FUNDED) revert InvalidStatus();
         if (msg.sender != order.buyer) revert Unauthorized();
-        if (block.timestamp < order.fulfillmentDeadline) revert TimeoutNotReached();
+        if (block.timestamp <= order.fulfillmentDeadline) revert TimeoutNotReached();
 
         order.state = OrderState.REFUNDED;
         uint256 totalRefund = order.grossAmount;
@@ -373,4 +420,3 @@ contract DecentralizedStripeEscrow is ReentrancyGuard, Pausable, Ownable, EIP712
         return _domainSeparatorV4();
     }
 }
-

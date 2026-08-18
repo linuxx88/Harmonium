@@ -1,17 +1,19 @@
 {
-  "name": "decentralized-stripe-contracts",
+  "name": "harmonium-pay-contracts",
   "version": "1.0.0",
-  "description": "Decentralized Stripe PoC Smart Contracts",
+  "description": "Harmonium Pay PoC Smart Contracts",
   "scripts": {
-    "test": "CI=true hardhat test",
-    "compile": "hardhat compile",
-    "demo": "CI=true hardhat run scripts/demo.js"
+    "test": "CI=true hardhat test --config hardhat.config.js",
+    "compile": "hardhat compile --config hardhat.config.js",
+    "demo": "CI=true hardhat run scripts/demo.js --config hardhat.config.js"
   },
   "devDependencies": {
     "@nomiclabs/hardhat-ethers": "^2.2.3",
     "@openzeppelin/contracts": "^5.0.1",
     "chai": "^4.3.7",
     "ethers": "^5.7.2",
-    "hardhat": "^2.19.4"
+    "hardhat": "^2.19.4",
+    "solhint": "^6.2.4",
+    "solidity-coverage": "^0.8.17"
   }
 }

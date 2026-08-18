@@ -14,7 +14,7 @@ async function main() {
   await usdc.deployed();
 
   // Deploy Primary Escrow Contract (Instance A)
-  const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+  const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
   const escrowA = await Escrow.deploy(usdc.address, [oracle1.address, oracle2.address, oracle3.address], feeRecipient.address);
   await escrowA.deployed();
 
@@ -49,7 +49,7 @@ async function main() {
       ["bytes32", "bytes32", "bytes32", "uint256", "address"],
       [
         ethers.utils.keccak256(ethers.utils.toUtf8Bytes("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)")),
-        ethers.utils.keccak256(ethers.utils.toUtf8Bytes("DecentralizedStripeEscrow")),
+        ethers.utils.keccak256(ethers.utils.toUtf8Bytes("HarmoniumPayEscrow")),
         ethers.utils.keccak256(ethers.utils.toUtf8Bytes("1")),
         currentChainId,
         escrowA.address
@@ -97,7 +97,7 @@ async function main() {
   const validDeadline = block.timestamp + 3600;
 
   const validDomainA = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: currentChainId,
     verifyingContract: escrowA.address
@@ -106,7 +106,7 @@ async function main() {
   // ASSERTION 3: Cross-Chain Replay Rejection
   console.log("\n[ASSERTION 3] Validating Cross-Chain Replay Rejection (Arbitrum 421614 vs Base 84532)...");
   const crossChainDomain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: currentChainId === 421614 ? 84532 : 421614,
     verifyingContract: escrowA.address
@@ -128,7 +128,7 @@ async function main() {
   // ASSERTION 4: Cross-Contract Replay Rejection
   console.log("\n[ASSERTION 4] Validating Cross-Contract Replay Rejection (Escrow A vs Escrow B)...");
   const crossContractDomain = {
-    name: "DecentralizedStripeEscrow",
+    name: "HarmoniumPayEscrow",
     version: "1",
     chainId: currentChainId,
     verifyingContract: escrowB.address

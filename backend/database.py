@@ -4,7 +4,7 @@ import json
 import time
 from typing import Optional, Dict, Any
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "decentralized_stripe.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "harmonium_pay.db")
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)

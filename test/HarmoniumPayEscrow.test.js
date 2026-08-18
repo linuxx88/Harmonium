@@ -1,7 +1,7 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
 
-describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", function () {
+describe("HarmoniumPayEscrow - Hardened EIP-712 & 2-of-3 Threshold", function () {
   let mockUSDC, escrow;
   let owner, buyer, seller, oracle1, oracle2, oracle3, feeRecipient, attacker;
 
@@ -29,7 +29,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
   async function createEIP712Signature(signer, orderId, buyerAddr, sellerAddr, tokenAddr, grossAmount, itemPrice, carrierId, trackingHash, nonce, voucherDeadline) {
     const chainId = (await ethers.provider.getNetwork()).chainId;
     const domain = {
-      name: "DecentralizedStripeEscrow",
+      name: "HarmoniumPayEscrow",
       version: "1",
       chainId: chainId,
       verifyingContract: escrow.address
@@ -73,7 +73,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
     mockUSDC = await MockUSDC.deploy();
     await mockUSDC.deployed();
 
-    const Escrow = await ethers.getContractFactory("DecentralizedStripeEscrow");
+    const Escrow = await ethers.getContractFactory("HarmoniumPayEscrow");
     escrow = await Escrow.deploy(
       mockUSDC.address,
       [oracle1.address, oracle2.address, oracle3.address],
@@ -179,7 +179,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       );
     });
 
-    it("Should revert on duplicate signatures from the same oracle signer", async function () {
+    it("Should revert on duplicate signatures from the same oracle signer resulting in insufficient quorum", async function () {
       const block = await ethers.provider.getBlock("latest");
       const voucherDeadline = block.timestamp + 3600;
       const sig1 = await createEIP712Signature(
@@ -189,11 +189,11 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       await expectRevertCustomError(
         escrow.releaseWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig1]),
         escrow,
-        "DuplicateSignature"
+        "InvalidQuorum"
       );
     });
 
-    it("Should revert on unauthorized attacker signature", async function () {
+    it("Should revert on unauthorized attacker signature resulting in insufficient valid quorum", async function () {
       const block = await ethers.provider.getBlock("latest");
       const voucherDeadline = block.timestamp + 3600;
       const sig1 = await createEIP712Signature(
@@ -206,8 +206,26 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       await expectRevertCustomError(
         escrow.releaseWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sigAttacker]),
         escrow,
-        "InvalidSignature"
+        "InvalidQuorum"
       );
+    });
+
+    it("Should succeed if invalid signature is followed by threshold of valid signatures (resilience)", async function () {
+      const block = await ethers.provider.getBlock("latest");
+      const voucherDeadline = block.timestamp + 3600;
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
+      );
+      const sig2 = await createEIP712Signature(
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
+      );
+      const sigAttacker = await createEIP712Signature(
+        attacker, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
+      );
+
+      await escrow.releaseWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sigAttacker, sig1, sig2]);
+      const order = await escrow.orders(ORDER_ID);
+      expect(order.state).to.equal(2); // OrderState.SETTLED
     });
 
     it("Should revert on expired signature voucherDeadline", async function () {
@@ -223,6 +241,48 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
         escrow.releaseWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, expiredDeadline, [sig1, sig2]),
         escrow,
         "SignatureExpired"
+      );
+    });
+
+    it("Should revert on forged/tampered EIP-712 parameter binding (itemPrice mismatch)", async function () {
+      const block = await ethers.provider.getBlock("latest");
+      const voucherDeadline = block.timestamp + 3600;
+      const tamperedPrice = ethers.utils.parseUnits("50", 6); // 50 instead of 100
+
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, tamperedPrice, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
+      );
+      const sig2 = await createEIP712Signature(
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, tamperedPrice, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline
+      );
+
+      await expectRevertCustomError(
+        escrow.releaseWithOracle(ORDER_ID, GROSS_AMOUNT, tamperedPrice, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [sig1, sig2]),
+        escrow,
+        "InvalidAccounting"
+      );
+    });
+
+    it("Should revert when attempting to replay a settlement on an already settled order", async function () {
+      const block = await ethers.provider.getBlock("latest");
+      const voucherDeadline = block.timestamp + 3600;
+      const nonce = 42;
+
+      const sig1 = await createEIP712Signature(
+        oracle1, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, nonce, voucherDeadline
+      );
+      const sig2 = await createEIP712Signature(
+        oracle2, ORDER_ID, buyer.address, seller.address, mockUSDC.address, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, nonce, voucherDeadline
+      );
+
+      // Settle successfully once
+      await escrow.settleWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, nonce, voucherDeadline, [sig1, sig2]);
+
+      // Replay attempt on same order reverts with InvalidStatus (already SETTLED)
+      await expectRevertCustomError(
+        escrow.settleWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, nonce, voucherDeadline, [sig1, sig2]),
+        escrow,
+        "InvalidStatus"
       );
     });
   });
@@ -375,7 +435,7 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       await expectRevertCustomError(
         escrow.connect(owner).releaseWithOracle(ORDER_ID, GROSS_AMOUNT, ITEM_PRICE, CARRIER_ID, TRACKING_HASH, 1, voucherDeadline, [ownerSig, attackerSig]),
         escrow,
-        "InvalidSignature"
+        "InvalidQuorum"
       );
     });
 
@@ -395,5 +455,131 @@ describe("DecentralizedStripeEscrow - Hardened EIP-712 & 2-of-3 Threshold", func
       expect((await mockUSDC.balanceOf(newFeeRecipient)).toString()).to.equal("0");
     });
   });
-});
 
+  describe("Branch & Edge Case Hardening", function () {
+    it("Should successfully execute refund via backward-compatible refundTimeout alias", async function () {
+      const orderIdAlias = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("order-alias-1"));
+      await escrow.connect(buyer).deposit(orderIdAlias, seller.address, ITEM_PRICE);
+      
+      await ethers.provider.send("evm_increaseTime", [7 * 86400 + 1]);
+      await ethers.provider.send("evm_mine");
+
+      const balanceBefore = await mockUSDC.balanceOf(buyer.address);
+      await escrow.connect(buyer).refundTimeout(orderIdAlias);
+      const balanceAfter = await mockUSDC.balanceOf(buyer.address);
+      expect(balanceAfter.sub(balanceBefore).toString()).to.equal(GROSS_AMOUNT.toString());
+    });
+
+    it("Should return correct domain separator via getDomainSeparator()", async function () {
+      const domainSep = await escrow.getDomainSeparator();
+      expect(domainSep).to.match(/^0x[a-fA-F0-9]{64}$/);
+    });
+
+    it("Should revert on setFeeRecipient with zero address", async function () {
+      await expectRevertCustomError(
+        escrow.connect(owner).setFeeRecipient(ethers.constants.AddressZero),
+        escrow,
+        "InvalidAddress"
+      );
+    });
+
+    it("Should allow proposing and executing oracle signers update with timelock", async function () {
+      await expectRevertCustomError(
+        escrow.connect(owner).proposeOracleSigners([oracle1.address]),
+        escrow,
+        "InvalidQuorum"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(owner).proposeOracleSigners([oracle1.address, ethers.constants.AddressZero, oracle2.address]),
+        escrow,
+        "InvalidAddress"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(owner).proposeOracleSigners([oracle1.address, oracle1.address, oracle2.address]),
+        escrow,
+        "DuplicateSignature"
+      );
+
+      const [newO1, newO2, newO3] = [buyer.address, seller.address, attacker.address];
+      await escrow.connect(owner).proposeOracleSigners([newO1, newO2, newO3]);
+
+      // Attempting to execute immediately reverts with TimelockNotExpired
+      await expectRevertCustomError(
+        escrow.connect(owner).executeOracleSignersUpdate(),
+        escrow,
+        "TimelockNotExpired"
+      );
+
+      // Fast forward 2 days
+      await ethers.provider.send("evm_increaseTime", [2 * 86400 + 1]);
+      await ethers.provider.send("evm_mine");
+
+      await escrow.connect(owner).executeOracleSignersUpdate();
+      expect(await escrow.isOracleSigner(newO1)).to.be.true;
+      expect(await escrow.isOracleSigner(oracle1.address)).to.be.false;
+    });
+
+    it("Should revert deposit with zero address seller or itemPrice below MIN_ITEM_PRICE", async function () {
+      const oIdZero = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("order-zero-test"));
+      await expectRevertCustomError(
+        escrow.connect(buyer).deposit(oIdZero, ethers.constants.AddressZero, ITEM_PRICE),
+        escrow,
+        "InvalidAddress"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(buyer).deposit(oIdZero, seller.address, 0),
+        escrow,
+        "InvalidAmount"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(buyer).deposit(oIdZero, seller.address, 999),
+        escrow,
+        "InvalidAmount"
+      );
+    });
+
+    it("Should revert deposit if order already exists", async function () {
+      const oIdDup = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("order-dup-test"));
+      await escrow.connect(buyer).deposit(oIdDup, seller.address, ITEM_PRICE);
+      await expectRevertCustomError(
+        escrow.connect(buyer).deposit(oIdDup, seller.address, ITEM_PRICE),
+        escrow,
+        "OrderAlreadyExists"
+      );
+    });
+
+    it("Should revert claimRefund if timeout is not reached or caller is not buyer", async function () {
+      const oIdRef = ethers.utils.keccak256(ethers.utils.toUtf8Bytes("order-ref-test"));
+      await escrow.connect(buyer).deposit(oIdRef, seller.address, ITEM_PRICE);
+
+      await expectRevertCustomError(
+        escrow.connect(buyer).claimRefund(oIdRef),
+        escrow,
+        "TimeoutNotReached"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(buyer).refundTimeout(oIdRef),
+        escrow,
+        "TimeoutNotReached"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(attacker).claimRefund(oIdRef),
+        escrow,
+        "Unauthorized"
+      );
+
+      await expectRevertCustomError(
+        escrow.connect(attacker).refundTimeout(oIdRef),
+        escrow,
+        "Unauthorized"
+      );
+    });
+  });
+
+});
