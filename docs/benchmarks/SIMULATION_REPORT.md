@@ -95,7 +95,7 @@ The stress simulation engine instantiated **5,000 independent agent wallets** op
 - **Git Tag:** `pre-audit-baseline`
 - **EVM Node:** Anvil / Local Hardhat Node (Chain ID: 31337)
 - **Node.js Environment:** Node.js `>= 18.x`, npm `>= 9.x`
-- **Python Environment:** Python `>= 3.10` with packages from `backend/requirements.txt` (`web3>=6.0`, `eth-account`, `eth-abi`, `fastapi`, `uvicorn`, `pydantic`)
+- **Python Environment:** Python `>= 3.10` with mock-oracle fixture packages (`web3>=6.0`, `eth-account`, `eth-abi`)
 - **Smart Contract Compiler:** Solidity `0.8.24` via Hardhat with optimizer enabled (`runs: 200`, evm target: `cancun`)
 
 ### 2. Dependency Setup & Compilation
@@ -107,10 +107,10 @@ cd Harmonium
 npm install
 npx hardhat compile
 
-# Set up Python virtual environment and install backend requirements
+# (Optional) Set up Python virtual environment for mock-oracle fixtures
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r backend/requirements.txt
+pip install "web3>=6.0" eth-account eth-abi
 ```
 
 ### 3. Execution Commands
