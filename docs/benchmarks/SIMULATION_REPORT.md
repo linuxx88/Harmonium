@@ -115,11 +115,11 @@ pip install "web3>=6.0" eth-account eth-abi
 
 ### 3. Execution Commands
 ```bash
-# A. Execute Full Smart Contract Test & Property-Based Fuzz Suite (48 Scenarios)
+# A. Execute Full Smart Contract Test & Property-Based Fuzz Suite (45 Scenarios)
 XDG_CONFIG_HOME=.hardhat_data XDG_DATA_HOME=.hardhat_data HARDHAT_DISABLE_TELEMETRY=true npx hardhat test
 
-# B. Execute Full 5,000-Agent Concurrency & Chaos Simulation
-python3 scripts/multi_agent_stress_simulation.py
+# B. Execute Protocol Flow Simulation Script
+node scripts/simulate_flow.js
 ```
 
 ### 4. Expected Benchmark Output Matrix

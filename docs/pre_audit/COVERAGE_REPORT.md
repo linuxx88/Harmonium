@@ -3,7 +3,7 @@
 ## Summary Metrics
 - **Tool**: `solidity-coverage` (v0.8.17)
 - **EVM Target**: Cancun (0.8.24)
-- **Total Passing Tests**: 48 tests (45 Hardhat tests across 3 suites + 3 Pytest backend tests)
+- **Total Passing Tests**: 45 tests across 3 Hardhat test suites (Unit, Property Fuzzing, Oracle Chaos)
 
 ## Contract Coverage Breakdown
 
